@@ -43,6 +43,9 @@ class ChatToolWindowFactory : ToolWindowFactory {
 
         init {
             instances[project] = this
+            com.intellij.openapi.util.Disposer.register(project) {
+                instances.remove(project)
+            }
             chatArea.isEditable = false
             mainPanel.add(JScrollPane(chatArea), BorderLayout.CENTER)
 
