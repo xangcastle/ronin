@@ -95,7 +95,6 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 modelComboBox.selectedItem = currentModel
             } else if (models.isNotEmpty()) {
                 modelComboBox.selectedItem = models[0]
-                settings.model = models[0] // Update state if invalid
             }
         }
 
