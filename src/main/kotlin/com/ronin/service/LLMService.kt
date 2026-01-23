@@ -1,6 +1,6 @@
 package com.ronin.service
 
-import com.intellij.openapi.components.Service
+
 import com.intellij.openapi.project.Project
 
 interface LLMService {
@@ -8,7 +8,6 @@ interface LLMService {
     fun getAvailableModels(provider: String): List<String>
 }
 
-@Service(Service.Level.PROJECT)
 class LLMServiceImpl(private val project: Project) : LLMService {
     override fun sendMessage(prompt: String, images: List<String>): String {
         // Simulate network delay to test UI responsiveness
