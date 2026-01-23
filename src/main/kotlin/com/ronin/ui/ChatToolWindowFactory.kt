@@ -7,8 +7,8 @@ import com.intellij.ui.content.ContentFactory
 import com.ronin.service.LLMService
 import com.intellij.openapi.components.service
 import java.awt.BorderLayout
-import java.awt.event.ActionEvent
 import javax.swing.*
+import java.util.concurrent.ConcurrentHashMap
 
 class ChatToolWindowFactory : ToolWindowFactory {
 
@@ -27,7 +27,16 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private val attachButton = JButton("Attach Image")
         private val modelComboBox = com.intellij.openapi.ui.ComboBox<String>()
 
+        companion object {
+            private val instances = ConcurrentHashMap<Project, ChatToolWindow>()
+
+            fun getInstance(project: Project): ChatToolWindow? {
+                return instances[project]
+            }
+        }
+
         init {
+            instances[project] = this
             chatArea.isEditable = false
             mainPanel.add(JScrollPane(chatArea), BorderLayout.CENTER)
 
@@ -97,7 +106,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private fun sendMessage() {
             val text = inputField.text
             if (text.isNotBlank()) {
-                chatArea.append("You: $text\n")
+                appendMessage("You", text)
                 inputField.text = ""
                 
                 // Asynchronously call LLM service to avoid freezing UI
@@ -106,8 +115,14 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     val llmService = project.service<LLMService>()
                     // Ensure we are using the latest model selection, although it's saved in state on change
                     val response = llmService.sendMessage(text)
-                    chatArea.append("Ronin: $response\n")
+                    appendMessage("Ronin", response)
                 }
+            }
+        }
+
+        fun appendMessage(role: String, message: String) {
+            SwingUtilities.invokeLater {
+                chatArea.append("$role: $message\n")
             }
         }
 
