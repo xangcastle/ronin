@@ -7,6 +7,7 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.wm.ToolWindowManager
 import com.ronin.service.LLMService
 import com.ronin.ui.ChatToolWindowFactory
+import com.ronin.MyBundle
 import javax.swing.SwingUtilities
 
 abstract class BaseRoninAction : AnAction() {
@@ -31,7 +32,7 @@ abstract class BaseRoninAction : AnAction() {
         toolWindow?.show {
             // 2. Append User's "pseudo-command" to chat
             val chatWindow = ChatToolWindowFactory.ChatToolWindow.getInstance(project)
-            chatWindow?.appendMessage(org.jetbrains.plugins.template.MyBundle.message("toolwindow.you"), prompt)
+            chatWindow?.appendMessage(MyBundle.message("toolwindow.you"), prompt)
 
             // 3. Call Service
             com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
@@ -39,7 +40,7 @@ abstract class BaseRoninAction : AnAction() {
                 val response = llmService.sendMessage(prompt)
                 
                 // 4. Append Response
-                chatWindow?.appendMessage(org.jetbrains.plugins.template.MyBundle.message("toolwindow.ronin"), response)
+                chatWindow?.appendMessage(MyBundle.message("toolwindow.ronin"), response)
             }
         }
     }

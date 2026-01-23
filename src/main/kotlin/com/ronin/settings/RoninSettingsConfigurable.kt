@@ -9,6 +9,8 @@ import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JLabel
 
+import com.ronin.MyBundle
+
 class RoninSettingsConfigurable : Configurable {
     private var settingsPanel: JPanel? = null
     private val openaiApiKeyField = JBPasswordField()
@@ -24,15 +26,15 @@ class RoninSettingsConfigurable : Configurable {
 
     override fun createComponent(): JComponent? {
         settingsPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.provider")), providerComboBox)
+            .addLabeledComponent(JLabel(MyBundle.message("settings.provider")), providerComboBox)
             .addSeparator()
-            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.openai_key")), openaiApiKeyField)
-            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.anthropic_key")), anthropicApiKeyField)
-            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.google_key")), googleApiKeyField)
-            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.kimi_key")), kimiApiKeyField)
-            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.minimax_key")), minimaxApiKeyField)
+            .addLabeledComponent(JLabel(MyBundle.message("settings.openai_key")), openaiApiKeyField)
+            .addLabeledComponent(JLabel(MyBundle.message("settings.anthropic_key")), anthropicApiKeyField)
+            .addLabeledComponent(JLabel(MyBundle.message("settings.google_key")), googleApiKeyField)
+            .addLabeledComponent(JLabel(MyBundle.message("settings.kimi_key")), kimiApiKeyField)
+            .addLabeledComponent(JLabel(MyBundle.message("settings.minimax_key")), minimaxApiKeyField)
             .addSeparator()
-            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.ollama_url")), ollamaBaseUrlField)
+            .addLabeledComponent(JLabel(MyBundle.message("settings.ollama_url")), ollamaBaseUrlField)
             .addComponentFillVertically(JPanel(), 0)
             .panel
         

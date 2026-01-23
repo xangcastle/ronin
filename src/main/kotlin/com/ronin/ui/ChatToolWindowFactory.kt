@@ -7,7 +7,7 @@ import com.intellij.ui.content.ContentFactory
 import com.ronin.service.LLMService
 import com.intellij.openapi.components.service
 import com.intellij.openapi.application.ApplicationManager
-import org.jetbrains.plugins.template.MyBundle
+import com.ronin.MyBundle
 import java.awt.BorderLayout
 import javax.swing.*
 import java.util.concurrent.ConcurrentHashMap
