@@ -19,10 +19,10 @@
     <actions>
         <group id="Ronin.Actions" text="Ronin" popup="true">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-            <action id="Ronin.ExplainCode" class="com.ronin.actions.ExplainCodeAction" text="Explain Code" description="Explain the selected code using Ronin"/>
-            <action id="Ronin.FixCode" class="com.ronin.actions.FixCodeAction" text="Fix Code" description="Fix the selected code using Ronin"/>
-            <action id="Ronin.GenerateUnitTests" class="com.ronin.actions.GenerateUnitTestsAction" text="Generate Unit Tests" description="Generate unit tests for the selected code using Ronin"/>
-            <action id="Ronin.ImproveCode" class="com.ronin.actions.ImproveCodeAction" text="Improve Code" description="Improve the selected code using Ronin"/>
+            <action id="Ronin.ExplainCode" class="com.ronin.actions.ExplainCodeAction" key="action.explain" description-key="action.explain.desc"/>
+            <action id="Ronin.FixCode" class="com.ronin.actions.FixCodeAction" key="action.fix" description-key="action.fix.desc"/>
+            <action id="Ronin.GenerateUnitTests" class="com.ronin.actions.GenerateUnitTestsAction" key="action.tests" description-key="action.tests.desc"/>
+            <action id="Ronin.ImproveCode" class="com.ronin.actions.ImproveCodeAction" key="action.improve" description-key="action.improve.desc"/>
         </group>
     </actions>
 </idea-plugin>

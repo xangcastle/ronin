@@ -31,15 +31,15 @@ abstract class BaseRoninAction : AnAction() {
         toolWindow?.show {
             // 2. Append User's "pseudo-command" to chat
             val chatWindow = ChatToolWindowFactory.ChatToolWindow.getInstance(project)
-            chatWindow?.appendMessage("You", prompt)
+            chatWindow?.appendMessage(org.jetbrains.plugins.template.MyBundle.message("toolwindow.you"), prompt)
 
             // 3. Call Service
-            SwingUtilities.invokeLater {
+            com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
                 val llmService = project.service<LLMService>()
                 val response = llmService.sendMessage(prompt)
                 
                 // 4. Append Response
-                chatWindow?.appendMessage("Ronin", response)
+                chatWindow?.appendMessage(org.jetbrains.plugins.template.MyBundle.message("toolwindow.ronin"), response)
             }
         }
     }

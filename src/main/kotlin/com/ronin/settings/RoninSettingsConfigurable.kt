@@ -24,15 +24,15 @@ class RoninSettingsConfigurable : Configurable {
 
     override fun createComponent(): JComponent? {
         settingsPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent(JLabel("Provider:"), providerComboBox)
+            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.provider")), providerComboBox)
             .addSeparator()
-            .addLabeledComponent(JLabel("OpenAI API Key:"), openaiApiKeyField)
-            .addLabeledComponent(JLabel("Anthropic API Key:"), anthropicApiKeyField)
-            .addLabeledComponent(JLabel("Google API Key:"), googleApiKeyField)
-            .addLabeledComponent(JLabel("Kimi API Key:"), kimiApiKeyField)
-            .addLabeledComponent(JLabel("Minimax API Key:"), minimaxApiKeyField)
+            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.openai_key")), openaiApiKeyField)
+            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.anthropic_key")), anthropicApiKeyField)
+            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.google_key")), googleApiKeyField)
+            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.kimi_key")), kimiApiKeyField)
+            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.minimax_key")), minimaxApiKeyField)
             .addSeparator()
-            .addLabeledComponent(JLabel("Ollama Base URL:"), ollamaBaseUrlField)
+            .addLabeledComponent(JLabel(org.jetbrains.plugins.template.MyBundle.message("settings.ollama_url")), ollamaBaseUrlField)
             .addComponentFillVertically(JPanel(), 0)
             .panel
         

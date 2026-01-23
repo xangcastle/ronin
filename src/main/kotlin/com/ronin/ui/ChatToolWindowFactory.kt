@@ -6,6 +6,8 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
 import com.ronin.service.LLMService
 import com.intellij.openapi.components.service
+import com.intellij.openapi.application.ApplicationManager
+import org.jetbrains.plugins.template.MyBundle
 import java.awt.BorderLayout
 import javax.swing.*
 import java.util.concurrent.ConcurrentHashMap
@@ -23,8 +25,8 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private val mainPanel = JPanel(BorderLayout())
         private val chatArea = JTextArea()
         private val inputField = JTextField()
-        private val sendButton = JButton("Send")
-        private val attachButton = JButton("Attach Image")
+        private val sendButton = JButton(MyBundle.message("toolwindow.send"))
+        private val attachButton = JButton(MyBundle.message("toolwindow.attach"))
         private val modelComboBox = com.intellij.openapi.ui.ComboBox<String>()
 
         companion object {
@@ -47,7 +49,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
             
             // Model Selector
             val modelPanel = JPanel()
-            modelPanel.add(JLabel("Model:"))
+            modelPanel.add(JLabel(MyBundle.message("toolwindow.model")))
             modelPanel.add(modelComboBox)
             controlsPanel.add(modelPanel, BorderLayout.WEST)
 
@@ -82,15 +84,9 @@ class ChatToolWindowFactory : ToolWindowFactory {
             val provider = settings.provider
             val currentModel = settings.model
             
-            val models = when (provider) {
-                "OpenAI" -> arrayOf("gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo")
-                "Anthropic" -> arrayOf("claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307")
-                "Google" -> arrayOf("gemini-1.5-pro", "gemini-1.0-pro")
-                "Kimi" -> arrayOf("moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k")
-                "Minimax" -> arrayOf("abab6.5-chat", "abab6-chat")
-                "Ollama" -> arrayOf("llama3", "mistral", "gemma:7b", "codellama")
-                else -> arrayOf("gpt-4o")
-            }
+            val llmService = project.service<LLMService>()
+            val modelsList = llmService.getAvailableModels(provider)
+            val models = modelsList.toTypedArray()
             
             val model = DefaultComboBoxModel(models)
             modelComboBox.model = model
@@ -106,16 +102,15 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private fun sendMessage() {
             val text = inputField.text
             if (text.isNotBlank()) {
-                appendMessage("You", text)
+                appendMessage(MyBundle.message("toolwindow.you"), text)
                 inputField.text = ""
                 
                 // Asynchronously call LLM service to avoid freezing UI
-                SwingUtilities.invokeLater {
-                    // In a real app, this should run on a background thread
+                ApplicationManager.getApplication().executeOnPooledThread {
                     val llmService = project.service<LLMService>()
                     // Ensure we are using the latest model selection, although it's saved in state on change
                     val response = llmService.sendMessage(text)
-                    appendMessage("Ronin", response)
+                    appendMessage(MyBundle.message("toolwindow.ronin"), response)
                 }
             }
         }
@@ -127,7 +122,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
         }
 
         private fun attachImage() {
-            chatArea.append("[System]: Image attachment not yet implemented (Mock)\n")
+            chatArea.append(MyBundle.message("toolwindow.system.image_mock"))
         }
 
         fun getContent(): JComponent {
