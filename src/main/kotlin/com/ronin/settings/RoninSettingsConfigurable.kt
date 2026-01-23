@@ -49,7 +49,7 @@ class RoninSettingsConfigurable : Configurable {
                 String(kimiApiKeyField.password) != (CredentialHelper.getApiKey("kimiApiKey") ?: "") ||
                 String(minimaxApiKeyField.password) != (CredentialHelper.getApiKey("minimaxApiKey") ?: "") ||
                 ollamaBaseUrlField.text != settings.ollamaBaseUrl ||
-                providerComboBox.selectedItem != settings.provider
+                (providerComboBox.selectedItem as? String ?: "OpenAI") != settings.provider
     }
 
     override fun apply() {
