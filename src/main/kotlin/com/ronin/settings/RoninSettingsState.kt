@@ -10,7 +10,7 @@ import com.intellij.openapi.components.service
     storages = [Storage("ronin_settings.xml")]
 )
 class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
-    var ollamaBaseUrl: String = "http://localhost:11434/"
+    var ollamaBaseUrl: String = "http://localhost:11434"
     
     var model: String = "gpt-4o"
     var provider: String = "OpenAI"
