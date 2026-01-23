@@ -35,6 +35,10 @@ class ChatToolWindowFactory : ToolWindowFactory {
             fun getInstance(project: Project): ChatToolWindow? {
                 return instances[project]
             }
+
+            fun refreshAll() {
+                instances.values.forEach { it.updateModelList() }
+            }
         }
 
         init {
@@ -79,7 +83,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
             }
         }
         
-        private fun updateModelList() {
+        fun updateModelList() {
             val settings = com.ronin.settings.RoninSettingsState.instance
             val provider = settings.provider
             val currentModel = settings.model

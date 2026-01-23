@@ -61,6 +61,7 @@ class RoninSettingsConfigurable : Configurable {
         CredentialHelper.setApiKey("minimaxApiKey", String(minimaxApiKeyField.password))
         settings.ollamaBaseUrl = ollamaBaseUrlField.text
         settings.provider = providerComboBox.selectedItem as? String ?: "OpenAI"
+        com.ronin.ui.ChatToolWindowFactory.ChatToolWindow.refreshAll()
     }
 
     override fun reset() {
