@@ -60,7 +60,7 @@ class RoninSettingsConfigurable : Configurable {
         CredentialHelper.setApiKey("kimiApiKey", String(kimiApiKeyField.password))
         CredentialHelper.setApiKey("minimaxApiKey", String(minimaxApiKeyField.password))
         settings.ollamaBaseUrl = ollamaBaseUrlField.text
-        settings.provider = providerComboBox.selectedItem as String ?: "OpenAI"
+        settings.provider = providerComboBox.selectedItem as? String ?: "OpenAI"
     }
 
     override fun reset() {
