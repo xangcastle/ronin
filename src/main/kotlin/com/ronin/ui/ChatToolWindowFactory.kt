@@ -117,6 +117,20 @@ class ChatToolWindowFactory : ToolWindowFactory {
         fun appendMessage(role: String, message: String) {
             SwingUtilities.invokeLater {
                 chatArea.append("$role: $message\n")
+                // Limit chat history to avoid memory issues (approx 50k chars)
+                if (chatArea.text.length > 50000) {
+                    val excess = chatArea.text.length - 50000
+                    try {
+                        chatArea.replaceRange("", 0, excess)
+                        // Adjust to remove partial line if needed (simple approximation)
+                        val nextNewline = chatArea.text.indexOf('\n')
+                        if (nextNewline != -1 && nextNewline < 100) {
+                            chatArea.replaceRange("", 0, nextNewline + 1)
+                        }
+                    } catch (e: Exception) {
+                        // Ignore potential bounds errors in rare race conditions
+                    }
+                }
             }
         }
 
