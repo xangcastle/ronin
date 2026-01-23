@@ -19,7 +19,18 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         }
         
         val settings = com.ronin.settings.RoninSettingsState.instance
-        return "Rank: Mock Response\nProvider: ${settings.provider}\nModel: ${settings.model}\n\nEcho: $prompt"
+        val apiKeyName = when(settings.provider) {
+            "OpenAI" -> "openaiApiKey"
+            "Anthropic" -> "anthropicApiKey"
+            "Google" -> "googleApiKey"
+            "Kimi" -> "kimiApiKey"
+            "Minimax" -> "minimaxApiKey"
+            else -> "openaiApiKey"
+        }
+        val apiKey = com.ronin.settings.CredentialHelper.getApiKey(apiKeyName)
+        val hasKey = if (!apiKey.isNullOrBlank()) "Yes" else "No"
+        
+        return "Rank: Mock Response\nProvider: ${settings.provider}\nModel: ${settings.model}\nAPI Key Present: $hasKey\n\nEcho: $prompt"
     }
 
     override fun getAvailableModels(provider: String): List<String> {

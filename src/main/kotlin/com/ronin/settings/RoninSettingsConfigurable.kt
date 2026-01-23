@@ -43,33 +43,33 @@ class RoninSettingsConfigurable : Configurable {
 
     override fun isModified(): Boolean {
         val settings = RoninSettingsState.instance
-        return String(openaiApiKeyField.password) != settings.openaiApiKey ||
-                String(anthropicApiKeyField.password) != settings.anthropicApiKey ||
-                String(googleApiKeyField.password) != settings.googleApiKey ||
-                String(kimiApiKeyField.password) != settings.kimiApiKey ||
-                String(minimaxApiKeyField.password) != settings.minimaxApiKey ||
+        return String(openaiApiKeyField.password) != (CredentialHelper.getApiKey("openaiApiKey") ?: "") ||
+                String(anthropicApiKeyField.password) != (CredentialHelper.getApiKey("anthropicApiKey") ?: "") ||
+                String(googleApiKeyField.password) != (CredentialHelper.getApiKey("googleApiKey") ?: "") ||
+                String(kimiApiKeyField.password) != (CredentialHelper.getApiKey("kimiApiKey") ?: "") ||
+                String(minimaxApiKeyField.password) != (CredentialHelper.getApiKey("minimaxApiKey") ?: "") ||
                 ollamaBaseUrlField.text != settings.ollamaBaseUrl ||
                 providerComboBox.selectedItem != settings.provider
     }
 
     override fun apply() {
         val settings = RoninSettingsState.instance
-        settings.openaiApiKey = String(openaiApiKeyField.password)
-        settings.anthropicApiKey = String(anthropicApiKeyField.password)
-        settings.googleApiKey = String(googleApiKeyField.password)
-        settings.kimiApiKey = String(kimiApiKeyField.password)
-        settings.minimaxApiKey = String(minimaxApiKeyField.password)
+        CredentialHelper.setApiKey("openaiApiKey", String(openaiApiKeyField.password))
+        CredentialHelper.setApiKey("anthropicApiKey", String(anthropicApiKeyField.password))
+        CredentialHelper.setApiKey("googleApiKey", String(googleApiKeyField.password))
+        CredentialHelper.setApiKey("kimiApiKey", String(kimiApiKeyField.password))
+        CredentialHelper.setApiKey("minimaxApiKey", String(minimaxApiKeyField.password))
         settings.ollamaBaseUrl = ollamaBaseUrlField.text
         settings.provider = providerComboBox.selectedItem as String ?: "OpenAI"
     }
 
     override fun reset() {
         val settings = RoninSettingsState.instance
-        openaiApiKeyField.text = settings.openaiApiKey
-        anthropicApiKeyField.text = settings.anthropicApiKey
-        googleApiKeyField.text = settings.googleApiKey
-        kimiApiKeyField.text = settings.kimiApiKey
-        minimaxApiKeyField.text = settings.minimaxApiKey
+        openaiApiKeyField.text = CredentialHelper.getApiKey("openaiApiKey") ?: ""
+        anthropicApiKeyField.text = CredentialHelper.getApiKey("anthropicApiKey") ?: ""
+        googleApiKeyField.text = CredentialHelper.getApiKey("googleApiKey") ?: ""
+        kimiApiKeyField.text = CredentialHelper.getApiKey("kimiApiKey") ?: ""
+        minimaxApiKeyField.text = CredentialHelper.getApiKey("minimaxApiKey") ?: ""
         ollamaBaseUrlField.text = settings.ollamaBaseUrl
         providerComboBox.selectedItem = settings.provider
     }
