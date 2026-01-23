@@ -8,7 +8,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 import com.ronin.service.LLMService
 import com.ronin.ui.ChatToolWindowFactory
 import com.ronin.MyBundle
-import javax.swing.SwingUtilities
+
 
 abstract class BaseRoninAction : AnAction() {
 
