@@ -101,17 +101,40 @@ class ChatToolWindowFactory : ToolWindowFactory {
             val provider = settings.provider
             val currentModel = settings.model
             
+            // Initial placeholder
+            val initialModels = arrayOf(currentModel.ifBlank { "Loading..." })
+            modelComboBox.model = DefaultComboBoxModel(initialModels)
+            modelComboBox.isEnabled = false
+            
             val llmService = project.service<LLMService>()
-            val modelsList = llmService.getAvailableModels(provider)
-            val models = modelsList.toTypedArray()
             
-            val model = DefaultComboBoxModel(models)
-            modelComboBox.model = model
-            
-            if (models.contains(currentModel)) {
-                modelComboBox.selectedItem = currentModel
-            } else if (models.isNotEmpty()) {
-                modelComboBox.selectedItem = models[0]
+            ApplicationManager.getApplication().executeOnPooledThread {
+                // Fetch dynamic list (network call)
+                val modelsList = if (provider == "OpenAI") {
+                    try {
+                        val fetched = llmService.fetchAvailableModels(provider)
+                        if (fetched.isNotEmpty()) fetched else llmService.getAvailableModels(provider)
+                    } catch (e: Exception) {
+                        llmService.getAvailableModels(provider)
+                    }
+                } else {
+                    llmService.getAvailableModels(provider)
+                }
+                
+                SwingUtilities.invokeLater {
+                    val models = modelsList.toTypedArray()
+                    val model = DefaultComboBoxModel(models)
+                    modelComboBox.model = model
+                    modelComboBox.isEnabled = true
+                    
+                    if (models.contains(currentModel)) {
+                        modelComboBox.selectedItem = currentModel
+                    } else if (models.isNotEmpty()) {
+                        modelComboBox.selectedItem = models[0]
+                        // Update settings default if we switched
+                        com.ronin.settings.RoninSettingsState.instance.model = models[0]
+                    }
+                }
             }
         }
 
@@ -136,16 +159,51 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     }
                     contextBuilder.append(projectStructure)
                     
+                    // Send message to LLM
                     val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
                     
-                    // Parse and apply changes (side-effect)
-                    com.ronin.service.ResponseParser.parseAndApply(response, project)
+                    // Parse: File edits are applied; Command extracted
+                    val result = com.ronin.service.ResponseParser.parseAndApply(response, project)
                     
-                    appendMessage(MyBundle.message("toolwindow.ronin"), response)
+                    appendMessage(MyBundle.message("toolwindow.ronin"), result.text)
+                    messageHistory.add(mapOf("role" to "user", "content" to text))
+                    messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
                     
-                    // Add to history
-                    messageHistory.add(mapOf("role" to "user", "content" to text)) // Note: We might want the FULL prompt with context in history? No, keeps clean. context is re-injected.
-                    messageHistory.add(mapOf("role" to "assistant", "content" to response))
+                    // Handle Command Execution Loop
+                    val command = result.commandToRun
+                    if (command != null) {
+                        appendMessage("System", "Running command: `${result.commandToRun}`...")
+                        
+                        // Execute in background to avoid freezing UI
+                        ApplicationManager.getApplication().executeOnPooledThread {
+                            val terminalService = project.service<com.ronin.service.TerminalService>()
+                            
+                            // Streaming Output Setup
+                            SwingUtilities.invokeLater {
+                                appendMessage("System", "Running command: `$command`\nOutput:")
+                            }
+                            
+                            val output = terminalService.runCommand(command) { line ->
+                                // Stream logic: Append line to the output message
+                                // Simplifying by just appending to the chat log for now.
+                                // Ideal would be to append to the specific block, but appendMessage adds to the bottom.
+                                // We can just append the text.
+                                SwingUtilities.invokeLater {
+                                    chatArea.append(line)
+                                }
+                            }
+                            
+                            SwingUtilities.invokeLater {
+                                appendMessage("System", "Command Finished.")
+                                
+                                // Automatic Feedback Loop: Send output back to LLM
+                                // Construct a new "User" message that is actually the system output
+                                val followUpPrompt = "Command Output:\n```\n$output\n```\nIf there are errors, please fix them."
+                                
+                                handleFollowUp(followUpPrompt)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -176,6 +234,47 @@ class ChatToolWindowFactory : ToolWindowFactory {
                         // Ignore potential bounds errors
                     }
                 }
+            }
+        }
+
+        // Helper for the feedback loop
+        private fun handleFollowUp(text: String) {
+            // Add to UI immediately
+             appendMessage(MyBundle.message("toolwindow.user") + " (Auto)", text)
+             
+            // Re-run the send logic (minus the input field clearing part)
+            val settings = com.ronin.settings.RoninSettingsState.instance
+            val apiKeyName = if (settings.provider == "Anthropic") "anthropicApiKey" else "openaiApiKey"
+            val apiKey = com.ronin.settings.CredentialHelper.getApiKey(apiKeyName)
+            
+            if (apiKey.isNullOrBlank()) {
+                appendMessage("System", "Error: API Key missing for follow-up.")
+                return
+            }
+            
+            val llmService = project.service<LLMService>()
+            
+            ApplicationManager.getApplication().executeOnPooledThread {
+                val contextBuilder = StringBuilder()
+                 // Reuse previous context or fetch fresh? Fresh is safer if file changed.
+                 val contextService = project.service<com.ronin.service.ContextService>()
+                 contextService.getActiveFileContent()?.let {
+                    contextBuilder.append("Active File Content:\n$it\n\n")
+                 }
+                 contextBuilder.append(contextService.getProjectStructure())
+                 
+                 val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
+                 val result = com.ronin.service.ResponseParser.parseAndApply(response, project)
+                 
+                 SwingUtilities.invokeLater {
+                    appendMessage(MyBundle.message("toolwindow.ronin"), result.text)
+                    messageHistory.add(mapOf("role" to "user", "content" to text))
+                    messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
+                    
+                     // Recurse again? Limit to 1 level to avoid infinite loops for now
+                     // or implementing a max_depth counter.
+                     // For V1, let's allow it but rely on user to stop if it goes crazy.
+                 }
             }
         }
 

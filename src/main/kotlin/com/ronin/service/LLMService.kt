@@ -6,6 +6,7 @@ package com.ronin.service
 interface LLMService {
     fun sendMessage(prompt: String, context: String? = null, history: List<Map<String, String>> = emptyList(), images: List<String> = emptyList()): String
     fun getAvailableModels(provider: String): List<String>
+    fun fetchAvailableModels(provider: String): List<String>
 }
 
 class LLMServiceImpl : LLMService {
@@ -26,6 +27,10 @@ class LLMServiceImpl : LLMService {
             ```<language>
             ... full content of the file ...
             ```
+            
+            To EXECUTE a terminal command, use:
+            [EXECUTE: <command>]
+            (e.g., [EXECUTE: ls -la] or [EXECUTE: bazel test //...])
             
             Context:
             $context
@@ -145,6 +150,9 @@ class LLMServiceImpl : LLMService {
     }
 
     override fun getAvailableModels(provider: String): List<String> {
+        // This is now a simple getter, but typically the UI should call fetchAvailableModels() 
+        // which might cache the result. For now, let's keep the hardcoded list as a fallback
+        // until the async fetch completes.
         return when (provider) {
             "OpenAI" -> listOf("gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo")
             "Anthropic" -> listOf("claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307")
@@ -154,5 +162,47 @@ class LLMServiceImpl : LLMService {
             "Ollama" -> listOf("llama3", "mistral", "gemma:7b", "codellama")
             else -> listOf("gpt-4o")
         }
+    }
+    
+    // Validating against the interface logic which we will update next, but technically 
+    // we need to add this method to the interface first or simultaneously. 
+    // Since I can only edit one file block efficiently, I'll add the implementation here 
+    // and assume I'll update the interface header in a separate tool call if needed
+    // OR I can use multi-replace if I knew the line numbers perfectly.
+    // Let's add the implementation as a new method.
+    
+    override fun fetchAvailableModels(provider: String): List<String> {
+        if (provider != "OpenAI") return getAvailableModels(provider)
+
+        val apiKey = com.ronin.settings.CredentialHelper.getApiKey("openaiApiKey")
+        if (apiKey.isNullOrBlank()) return getAvailableModels(provider)
+
+        val request = java.net.http.HttpRequest.newBuilder()
+            .timeout(java.time.Duration.ofSeconds(10))
+            .uri(java.net.URI.create("https://api.openai.com/v1/models"))
+            .header("Authorization", "Bearer $apiKey")
+            .GET()
+            .build()
+            
+        try {
+            val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
+            if (response.statusCode() == 200) {
+                // Parse JSON manually to find "id"
+                val json = response.body()
+                val models = mutableListOf<String>()
+                val pattern = "\"id\"\\s*:\\s*\"([^\"]+)\"".toRegex()
+                pattern.findAll(json).forEach { match ->
+                    val id = match.groupValues[1]
+                    // Filter for chat models to avoid clutter
+                    if (id.startsWith("gpt") || id.startsWith("o1")) {
+                        models.add(id)
+                    }
+                }
+                return models.sorted().reversed()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return getAvailableModels(provider)
     }
 }
