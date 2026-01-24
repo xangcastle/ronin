@@ -2,13 +2,22 @@
 
 > **"The masterless coding agent. Serving only your code."**
 
+
+<!-- Plugin description -->
+**Ronin** is the masterless coding agent, serving only your code. 
+
+
+![Ronin.png](docs/Ronin.png)
+
 ## ⚡ The Philosophy: Stability in a Volatile World
 
 **Ronin** was born from a simple observation: **proprietary tools are volatile.** We've all seen the cycle: excellent tools attract early adopters with "unlimited" promises, only to alter the deal, cap productivity, or change Terms of Service overnight when the economics shift.
 
-We believe a developer's environment should be **deterministic infrastructure**, not a shifting service. You shouldn't be penalized for being "too productive"? and your workflow shouldn't break because a company decides to pivot.
+We believe a developer's environment should be **deterministic infrastructure**, not a shifting service. You shouldn't be penalized for being "too productive" — and your workflow shouldn't break because a company decides to pivot.
 
 **Ronin is different.** We are removing the rent-seeking layer entirely. This is about trust, sovereignty, and code.
+<!-- Plugin description end -->
+
 
 ## 🛡️ The Ronin Covenant
 

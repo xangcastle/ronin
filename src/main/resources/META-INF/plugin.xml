@@ -1,15 +1,24 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>org.jetbrains.plugins.template</id>
-    <name>IntelliJ Platform Plugin Template</name>
-    <vendor>JetBrains</vendor>
+    <id>com.ronin.plugin</id>
+    <name>Ronin</name>
+    <vendor>Ronin</vendor>
 
-    <depends>com.intellij.modules.platform</depends>
-
-    <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="org.jetbrains.plugins.template.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="org.jetbrains.plugins.template.startup.MyProjectActivity" />
+        <toolWindow factoryClass="com.ronin.ui.ChatToolWindowFactory" id="Ronin Chat" anchor="right" icon="AllIcons.Toolwindows.ToolWindowMessages"/>
+        <applicationConfigurable parentId="tools" instance="com.ronin.settings.RoninSettingsConfigurable" id="com.ronin.settings.RoninSettingsConfigurable" displayName="Ronin"/>
+        <applicationService serviceImplementation="com.ronin.settings.RoninSettingsState"/>
+        <projectService serviceInterface="com.ronin.service.LLMService" serviceImplementation="com.ronin.service.LLMServiceImpl"/>
     </extensions>
+
+    <actions>
+        <group id="Ronin.Actions" text="Ronin" popup="true">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <action id="Ronin.ExplainCode" class="com.ronin.actions.ExplainCodeAction" key="action.explain" description-key="action.explain.desc"/>
+            <action id="Ronin.FixCode" class="com.ronin.actions.FixCodeAction" key="action.fix" description-key="action.fix.desc"/>
+            <action id="Ronin.GenerateUnitTests" class="com.ronin.actions.GenerateUnitTestsAction" key="action.tests" description-key="action.tests.desc"/>
+            <action id="Ronin.ImproveCode" class="com.ronin.actions.ImproveCodeAction" key="action.improve" description-key="action.improve.desc"/>
+        </group>
+    </actions>
 </idea-plugin>
