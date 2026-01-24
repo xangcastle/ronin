@@ -61,45 +61,81 @@ The codebase is organized into clear functional components:
     *   **`LLMService`**: Communicates with AI providers (OpenAI, etc.).
     *   **`ContextService`**: Reads the active file and project structure to give the agent context.
     *   **`EditService`**: Safely modifies files in the editor using the IntelliJ SDK.
-    *   **`ResponseParser`**: Detects file update commands in the AI's response.
-*   **`src/main/kotlin/com/ronin/settings`**: Manages user configuration (API keys, models).
-
-## 🧠 Chat Architecture
-
-How Ronin processes and acts on your requests:
-
+## 🧠 Agentic Architecture
+ 
+Ronin is an autonomous loop rooted in the `ChatToolWindowFactory` but triggered via multiple entry points.
+ 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant UI as Chat Tool Window
+    participant Action as Editor Action
+    participant UI as Chat UI
     participant Context as ContextService
-    participant Service as LLM Service
-    participant Provider as LLM Provider
+    participant LLM as LLMService
     participant Parser as ResponseParser
-    participant Edit as EditService
+    participant Tools as Tools (Edit/Terminal)
 
-    User->>UI: Sends Message
-    UI->>Context: getActiveFile() & getProjectStructure()
-    Context-->>UI: Returns Context
-    UI->>Service: sendMessage(prompt + context + history)
-    Service->>Provider: HTTP Request
-    Provider-->>Service: JSON Response ("... [UPDATED_FILE] ...")
-    Service-->>UI: Returns Full Text
-    UI->>Parser: parseAndApply(response)
-    alt Contains Editing Command
-        Parser->>Edit: replaceFileContent()
-        Edit-->>UI: File Updated in Editor
+    Action->>UI: explicit triggers (Explain/Fix)
+    User->>UI: Manual Input
+    
+    loop Agentic Cycle
+        UI->>Context: Gather Context (Active File + Tree)
+        UI->>LLM: Send Prompt + History
+        LLM-->>UI: Response (Text + Commands)
+        
+        UI->>Parser: Parse Response
+        
+        alt Has File Edit
+            Parser->>Tools: EditService.replaceFileContent()
+            Tools-->>UI: "📝 Created/Updated File"
+        end
+        
+        alt Has Terminal Command
+            Parser->>Tools: TerminalService.runCommand()
+            Tools-->>UI: Stream Output
+            UI->>LLM: Auto-FollowUp (Command Result)
+        end
     end
-    UI-->>User: Displays Response
 ```
-
+ 
+## ⚙️ System Components
+ 
+### Services (`src/main/kotlin/com/ronin/service`)
+The nervous system of the agent.
+ 
+| Service | Responsibility |
+| :--- | :--- |
+| **`LLMService`** | Manages API connections (OpenAI/o1). Handles model filtering, timeouts (5m for reasoning), and parameter optimization. |
+| **`ContextService`** | "Eyes" of the agent. Reads the active file content and scans the project directory tree (ignoring `node_modules`, `build`, etc.) to provide spatial awareness. |
+| **`EditService`** | "Hands" of the agent. Safely creates directories and modifies files using `WriteCommandAction`. Returns detailed success/failure feedback. |
+| **`TerminalService`** | "Legs" of the agent. Executes shell commands, capturing stdout/stderr to feed back into the reasoning loop. |
+| **`ResponseParser`** | The "Ear". Parses raw LLM output to detect intents like `[UPDATED_FILE]` or `[EXECUTE]`. |
+| **`ChatStorageService`** | The "Memory". Persists chat history to `ronin_chat_history.xml` so context survives IDE restarts. |
+ 
+### Actions (`src/main/kotlin/com/ronin/actions`)
+Context-menu triggers that bootstrap the agent with specific intents.
+ 
+*   **`ExplainCodeAction`**: Sends selected code with "Explain this..." prompt.
+*   **`FixCodeAction`**: Sends selected code with "Fix bugs..." prompt.
+*   **`ImproveCodeAction`**: Asks for refactoring ideas.
+*   **`GenerateUnitTestsAction`**: Asks for test coverage.
+*   **`BaseRoninAction`**: Abstract base that handles the pipeline: `Open Window -> Gather Context -> Send -> Apply`.
+ 
 ## 🗺️ Roadmap
-
-- [x] **Core Architecture**: Plugin skeleton and basic tool window.
-- [x] **Chat Interface**: Functional chat UI with history.
-- [x] **OpenAI Integration**: Live connection to OpenAI API.
-- [x] **Context Awareness**: Agent "sees" your active file and folder structure.
-- [x] **File Modification**: Agent can write code directly to your files.
-- [ ] **Multi-Provider Support**: Full implementation for Anthropic, Gemini, Ollama (currently mocked).
-- [ ] **Chat Persistence**: Save chat history across IDE restarts.
-- [ ] **Multimodal Support**: Real image attachment processing.
+ 
+### ✅ Architecture & Core
+- [x] **Agentic Loop**: Autonomous `Command -> Execute -> Analyze` cycle.
+- [x] **Context Awareness**: recursive project structure analysis and active file inputs.
+- [x] **Persistence**: `ChatStorageService` saves history across IDE restarts (XML-based).
+- [x] **Robust File Ops**: Create, edit, and fix files safely (`WriteCommandAction`) with feedback.
+ 
+### ✅ LLM Capabilities
+- [x] **OpenAI Integration**: Full support for `gpt-4o`, `gpt-4-turbo`.
+- [x] **Advanced Reasoning**: Optimized support for `o1-preview` and `o1-mini` (Temperature 1, 5min timeout).
+- [x] **Unlimited Context**: No arbitrary token limits (`max_tokens` removed); full model capacity enabled.
+- [ ] **Multi-Provider**: Native support for Anthropic/Claude and Ollama (Currently Beta/Mocked).
+ 
+### ✅ Developer Experience (DX)
+- [x] **Integrated Terminal**: Execute shell commands directly from chat options.
+- [x] **Responsive UI**: Fluid message bubbles (`GridBagLayout`) that respect window size.
+- [x] **Smart Logs**: Command outputs are summarized in UI to prevent clutter, but sent fully to LLM.
+- [ ] **Multimodal**: Drag-and-drop image support for visual debugging.
