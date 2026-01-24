@@ -14,15 +14,22 @@ object ResponseParser {
         val editService = project.service<EditService>()
         val fileUpdateRegex = "\\[UPDATED_FILE: (.*?)]\\s*```[a-z]*\\n([\\s\\S]*?)\\n```".toRegex()
 
+        // Regex to match the block. We use dot matches all for content.
+        val sb = StringBuilder(processedResponse)
+        val updates = mutableListOf<String>()
+        
         fileUpdateRegex.findAll(response).forEach { matchResult ->
             val filePath = matchResult.groupValues[1].trim()
             val newContent = matchResult.groupValues[2]
 
-            val virtualFile = editService.findFile(filePath)
-            if (virtualFile != null) {
-                editService.replaceFileContent(virtualFile, newContent)
-                // processedResponse = processedResponse.replace(matchResult.value, "✅ Updated file: $filePath") 
-            }
+            // Call new signature: returns String status
+            val status = editService.replaceFileContent(filePath, newContent)
+            updates.add("📝 $status")
+        }
+        
+        if (updates.isNotEmpty()) {
+            sb.append("\n\n" + updates.joinToString("\n"))
+            processedResponse = sb.toString()
         }
         
         // 2. Handle Command Execution

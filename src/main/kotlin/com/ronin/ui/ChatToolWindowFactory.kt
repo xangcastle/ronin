@@ -243,71 +243,110 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 SwingUtilities.invokeLater {
                     appendToLastTerminalBlock("\n[Finished]")
                     val followUpPrompt = "Command Output:\n```\n$output\n```\nIf there are errors, please fix them."
-                    handleFollowUp(followUpPrompt)
+                    val summary = "Command executed. Output (${output.lines().size} lines) sent to Ronin."
+                    handleFollowUp(followUpPrompt, summary)
                 }
             }
         }
 
-        // New UI: Bubble rendering
+        // New UI: Bubble rendering with Responsive Layout
         fun appendMessage(role: String, message: String) {
             SwingUtilities.invokeLater {
                 val isMe = role == MyBundle.message("toolwindow.you") || role.contains("You")
                 val isSystem = role == "System"
                 
-                // If system, we might handle it differently (Terminal Block)
-                // But specifically for general messages:
-                
-                val bubble = JPanel()
-                bubble.layout = BoxLayout(bubble, BoxLayout.Y_AXIS)
-                bubble.isOpaque = false
-                
-                // Alignment
-                val align = if (isMe) java.awt.FlowLayout.RIGHT else java.awt.FlowLayout.LEFT
-                val rowPanel = JPanel(java.awt.FlowLayout(align))
+                val rowPanel = JPanel(java.awt.GridBagLayout())
                 rowPanel.isOpaque = false
-                rowPanel.maximumSize = java.awt.Dimension(Int.MAX_VALUE, Int.MAX_VALUE) // Expands horizontally
+                val c = java.awt.GridBagConstraints()
+                c.gridx = 0
+                c.gridy = 0
+                c.weightx = 1.0
+                c.fill = java.awt.GridBagConstraints.HORIZONTAL
+                
+                // Alignment via anchor and empty border hack/insets
+                if (isMe) {
+                    c.anchor = java.awt.GridBagConstraints.EAST
+                    c.insets = java.awt.Insets(0, 50, 0, 0) // Push from left
+                } else {
+                    c.anchor = java.awt.GridBagConstraints.WEST
+                    c.insets = java.awt.Insets(0, 0, 0, 50) // Push from right
+                }
                 
                 // Content
-                // Use JTextArea for content to support wrapping, but styled as a label
-                val textArea = JTextArea(message)
+                val textArea = DynamicTextArea(message)
                 textArea.lineWrap = true
                 textArea.wrapStyleWord = true
                 textArea.isEditable = false
                 textArea.isOpaque = true
                 
                 // Styling
-                // Basic colors
                 if (isMe) {
-                    textArea.background = java.awt.Color(0, 122, 255) // Blue-ish
+                    textArea.background = java.awt.Color(0, 122, 255) 
                     textArea.foreground = java.awt.Color.WHITE
                 } else if (isSystem) {
-                    textArea.background = java.awt.Color(40, 44, 52) // Dark
-                    textArea.foreground = java.awt.Color(171, 178, 191) // Gray
+                    textArea.background = java.awt.Color(40, 44, 52) 
+                    textArea.foreground = java.awt.Color(171, 178, 191)
                     textArea.font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 12)
                 } else {
-                    textArea.background = com.intellij.util.ui.UIUtil.getPanelBackground() // Default
+                    textArea.background = com.intellij.util.ui.UIUtil.getPanelBackground()
                     textArea.foreground = com.intellij.util.ui.UIUtil.getLabelForeground()
                     textArea.border = BorderFactory.createLineBorder(java.awt.Color.GRAY, 1)
                 }
                 
-                // Padding
                 textArea.border = BorderFactory.createCompoundBorder(
                     textArea.border, 
                     BorderFactory.createEmptyBorder(8, 12, 8, 12)
                 )
                 
-                // Constraints for bubble size (max width 80%)
-                // Fixed columns is crude, preferred size is better
-                textArea.columns = 40 // approximate width
+                // Wrapper to force right/left alignment within the cell not filling full width if small text
+                val bubbleWrapper = JPanel(BorderLayout())
+                bubbleWrapper.isOpaque = false
+                bubbleWrapper.add(textArea, BorderLayout.CENTER)
                 
-                rowPanel.add(textArea)
+                rowPanel.add(bubbleWrapper, c)
+                
                 chatPanel.add(rowPanel)
-                chatPanel.add(Box.createVerticalStrut(10)) // Spacing
+                chatPanel.add(Box.createVerticalStrut(10)) 
                 
-                // Auto-scroll
                 chatPanel.revalidate()
                 val bar = scrollPane.verticalScrollBar
                 bar.value = bar.maximum
+            }
+        }
+        
+        // Custom TextArea that tries to fit within parent viewport
+        inner class DynamicTextArea(text: String) : JTextArea(text) {
+             override fun getPreferredSize(): java.awt.Dimension {
+                val d = super.getPreferredSize()
+                val viewport = scrollPane.viewport
+                if (viewport != null) {
+                    val maxW = (viewport.width * 0.85).toInt() // Max 85% width
+                    if (maxW > 100) { 
+                        // Simple constraint:
+                        if (d.width > maxW) {
+                            // Ideally we would calculate height for this width, but JTextArea is complex.
+                            // Simply constraining width allows basic wrapping.
+                             return java.awt.Dimension(maxW, d.height)
+                        }
+                    }
+                }
+                return d
+            }
+            
+            // This is crucial for word wrap to work when resized
+            override fun getScrollableTracksViewportWidth(): Boolean {
+                return true 
+            }
+            
+            override fun setBounds(x: Int, y: Int, width: Int, height: Int) {
+                // Constrain width
+                val viewport = scrollPane.viewport
+                var w = width
+                if (viewport != null) {
+                    val maxW = (viewport.width * 0.85).toInt()
+                    if (w > maxW) w = maxW
+                }
+                super.setBounds(x, y, w, height)
             }
         }
         
@@ -361,13 +400,9 @@ class ChatToolWindowFactory : ToolWindowFactory {
         }
 
         // Helper for the feedback loop
-        private fun handleFollowUp(text: String) {
+        private fun handleFollowUp(text: String, displayLabel: String) {
             // Add to UI immediately
-             appendMessage(MyBundle.message("toolwindow.you") + " (Auto)", text)
-             
-             // Gather Context on EDT
-             val contextService = project.service<com.ronin.service.ContextService>()
-             val activeFile = contextService.getActiveFileContent()
+             appendMessage(MyBundle.message("toolwindow.you") + " (Auto)", displayLabel)
              
             ApplicationManager.getApplication().executeOnPooledThread {
                 // Re-run the send logic (minus the input field clearing part)
@@ -383,6 +418,10 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 }
                 
                 val llmService = project.service<LLMService>()
+                
+                // Gather Context on EDT
+                val contextService = project.service<com.ronin.service.ContextService>()
+                val activeFile = contextService.getActiveFileContent()
                 
                 // Gather Project Structure in Background with Read Lock
                 val projectStructure = ReadAction.compute<String, Throwable> { 
