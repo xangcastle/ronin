@@ -61,7 +61,8 @@ class RoninSettingsConfigurable : Configurable {
         CredentialHelper.setApiKey("minimaxApiKey", String(minimaxApiKeyField.password))
         settings.ollamaBaseUrl = ollamaBaseUrlField.text
         settings.provider = providerComboBox.selectedItem as? String ?: "OpenAI"
-        com.ronin.ui.ChatToolWindowFactory.ChatToolWindow.refreshAll()
+        val messageBus = com.intellij.openapi.application.ApplicationManager.getApplication().messageBus
+        messageBus.syncPublisher(RoninSettingsNotifier.TOPIC).settingsChanged(settings)
     }
 
     override fun reset() {

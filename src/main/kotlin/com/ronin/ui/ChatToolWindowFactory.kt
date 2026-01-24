@@ -10,7 +10,6 @@ import com.intellij.openapi.application.ApplicationManager
 import com.ronin.MyBundle
 import java.awt.BorderLayout
 import javax.swing.*
-import java.util.concurrent.ConcurrentHashMap
 
 class ChatToolWindowFactory : ToolWindowFactory {
 
@@ -27,25 +26,29 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private val inputField = JTextField()
         private val sendButton = JButton(MyBundle.message("toolwindow.send"))
         private val attachButton = JButton(MyBundle.message("toolwindow.attach"))
+        private val clearButton = JButton(MyBundle.message("toolwindow.clear"))
         private val modelComboBox = com.intellij.openapi.ui.ComboBox<String>()
 
         companion object {
-            private val instances = ConcurrentHashMap<Project, ChatToolWindow>()
+            private const val KEY = "RoninChatToolWindow"
+            private const val MAX_HISTORY_CHARS = 50000
 
             fun getInstance(project: Project): ChatToolWindow? {
-                return instances[project]
-            }
-
-            fun refreshAll() {
-                instances.values.forEach { it.updateModelList() }
+                val toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project).getToolWindow("Ronin Chat") ?: return null
+                val content = toolWindow.contentManager.contents.firstOrNull() ?: return null
+                val component = content.component as? JComponent ?: return null
+                return component.getClientProperty(KEY) as? ChatToolWindow
             }
         }
 
         init {
-            instances[project] = this
-            com.intellij.openapi.util.Disposer.register(project) {
-                instances.remove(project)
-            }
+            mainPanel.putClientProperty(KEY, this)
+            val connection = ApplicationManager.getApplication().messageBus.connect(project)
+            connection.subscribe(com.ronin.settings.RoninSettingsNotifier.TOPIC, object : com.ronin.settings.RoninSettingsNotifier {
+                override fun settingsChanged(settings: com.ronin.settings.RoninSettingsState) {
+                    updateModelList()
+                }
+            })
             chatArea.isEditable = false
             mainPanel.add(JScrollPane(chatArea), BorderLayout.CENTER)
 
@@ -63,6 +66,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
             // Buttons
             val buttonPanel = JPanel()
             buttonPanel.add(attachButton)
+            buttonPanel.add(clearButton)
             buttonPanel.add(sendButton)
             controlsPanel.add(buttonPanel, BorderLayout.EAST)
             
@@ -73,6 +77,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
             sendButton.addActionListener { sendMessage() }
             inputField.addActionListener { sendMessage() }
             attachButton.addActionListener { attachImage() }
+            clearButton.addActionListener { clearChat() }
             
             // Initialize models
             updateModelList()
@@ -124,16 +129,35 @@ class ChatToolWindowFactory : ToolWindowFactory {
         fun appendMessage(role: String, message: String) {
             SwingUtilities.invokeLater {
                 chatArea.append("$role: $message\n")
-                // Limit chat history to 100 lines (approx 50 messages) to avoid memory issues
-                val lineCount = chatArea.lineCount
-                if (lineCount > 100) {
+                
+                // Limit chat history by characters to avoid memory issues
+                val doc = chatArea.document
+                if (doc.length > MAX_HISTORY_CHARS) {
                     try {
-                        val endOffset = chatArea.getLineEndOffset(lineCount - 100 - 1)
-                        chatArea.replaceRange("", 0, endOffset)
+                        val charsToRemove = doc.length - MAX_HISTORY_CHARS
+                        // Try to find a newline after the cutoff to delete clean lines
+                        val text = chatArea.text
+                        var cutoff = charsToRemove + 100 // Look a bit ahead
+                        if (cutoff >= text.length) cutoff = text.length
+                        
+                        val newlineIndex = text.indexOf('\n', charsToRemove)
+                        val removeUntil = if (newlineIndex in charsToRemove until cutoff) {
+                            newlineIndex + 1
+                        } else {
+                            charsToRemove
+                        }
+                        
+                        chatArea.replaceRange("", 0, removeUntil)
                     } catch (e: Exception) {
                         // Ignore potential bounds errors
                     }
                 }
+            }
+        }
+
+        private fun clearChat() {
+            SwingUtilities.invokeLater {
+                chatArea.text = ""
             }
         }
 

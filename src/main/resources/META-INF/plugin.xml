@@ -4,9 +4,6 @@
     <name>Ronin</name>
     <vendor>Ronin</vendor>
 
-    <depends>com.intellij.modules.platform</depends>
-
-    <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow factoryClass="com.ronin.ui.ChatToolWindowFactory" id="Ronin Chat" anchor="right" icon="AllIcons.Toolwindows.ToolWindowMessages"/>

@@ -15,15 +15,34 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
     var model: String = "gpt-4o"
     var provider: String = "OpenAI"
 
+    // Legacy fields for migration
+    var openaiApiKey: String? = null
+    var anthropicApiKey: String? = null
+    var googleApiKey: String? = null
+    var kimiApiKey: String? = null
+    var minimaxApiKey: String? = null
+
     override fun getState(): RoninSettingsState {
         return this
     }
 
     override fun loadState(state: RoninSettingsState) {
         this.ollamaBaseUrl = state.ollamaBaseUrl
-        
         this.model = state.model
         this.provider = state.provider
+
+        // Migrate keys to PasswordSafe if found in XML
+        migrateKey("openaiApiKey", state.openaiApiKey)
+        migrateKey("anthropicApiKey", state.anthropicApiKey)
+        migrateKey("googleApiKey", state.googleApiKey)
+        migrateKey("kimiApiKey", state.kimiApiKey)
+        migrateKey("minimaxApiKey", state.minimaxApiKey)
+    }
+
+    private fun migrateKey(keyName: String, value: String?) {
+        if (!value.isNullOrBlank()) {
+            CredentialHelper.setApiKey(keyName, value)
+        }
     }
 
     companion object {
