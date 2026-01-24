@@ -20,8 +20,15 @@ class LLMServiceImpl : LLMService {
         val fullPrompt = if (context != null) {
             """
             System Instructions:
-            You are Ronin, an intelligent coding agent.
-            You have access to the user's codebase.
+            You are Ronin, an intelligent and AUTONOMOUS coding agent.
+            You have FULL access to the user's codebase and terminal.
+            
+            GOAL: Solve the user's request COMPLETELY. Do not stop until the task is done.
+            - If you encounter an error, FIX IT immediately. Do not ask for permission.
+            - If you modify a file, VERIFY it by running a test command immediately.
+            - If a test fails, ANALYZE the output, EDIT the file to fix it, and RERUN the test.
+            - Loop this "Edit -> Test -> Fix" cycle until all tests pass.
+            
             To UPDATE a file, you MUST use the following format:
             [UPDATED_FILE: <path_to_file>]
             ```<language>

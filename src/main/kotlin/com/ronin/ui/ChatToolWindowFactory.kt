@@ -240,21 +240,23 @@ class ChatToolWindowFactory : ToolWindowFactory {
         // Helper for the feedback loop
         private fun handleFollowUp(text: String) {
             // Add to UI immediately
-             appendMessage(MyBundle.message("toolwindow.user") + " (Auto)", text)
+             appendMessage(MyBundle.message("toolwindow.you") + " (Auto)", text)
              
-            // Re-run the send logic (minus the input field clearing part)
-            val settings = com.ronin.settings.RoninSettingsState.instance
-            val apiKeyName = if (settings.provider == "Anthropic") "anthropicApiKey" else "openaiApiKey"
-            val apiKey = com.ronin.settings.CredentialHelper.getApiKey(apiKeyName)
-            
-            if (apiKey.isNullOrBlank()) {
-                appendMessage("System", "Error: API Key missing for follow-up.")
-                return
-            }
-            
-            val llmService = project.service<LLMService>()
-            
             ApplicationManager.getApplication().executeOnPooledThread {
+                // Re-run the send logic (minus the input field clearing part)
+                val settings = com.ronin.settings.RoninSettingsState.instance
+                val apiKeyName = if (settings.provider == "Anthropic") "anthropicApiKey" else "openaiApiKey"
+                
+                // Retrieve API Key in background thread to avoid "Slow operations are prohibited on EDT"
+                val apiKey = com.ronin.settings.CredentialHelper.getApiKey(apiKeyName)
+                
+                if (apiKey.isNullOrBlank()) {
+                    appendMessage("System", "Error: API Key missing for follow-up.")
+                    return@executeOnPooledThread
+                }
+                
+                val llmService = project.service<LLMService>()
+                
                 val contextBuilder = StringBuilder()
                  // Reuse previous context or fetch fresh? Fresh is safer if file changed.
                  val contextService = project.service<com.ronin.service.ContextService>()
@@ -274,7 +276,53 @@ class ChatToolWindowFactory : ToolWindowFactory {
                      // Recurse again? Limit to 1 level to avoid infinite loops for now
                      // or implementing a max_depth counter.
                      // For V1, let's allow it but rely on user to stop if it goes crazy.
+                     
+                     // If there's ANOTHER command, handle it
+                     val nextCommand = result.commandToRun
+                     if (nextCommand != null) {
+                         // Recurse execution logic? 
+                         // For safety, let's maybe NOT recurse infinitely automatically within this simplified block.
+                         // Or if we do, we should refactor "execute command" into a shared function.
+                         // For now, let's just notify.
+                         appendMessage("System", "Ronin wants to execute: `$nextCommand`. Recursing...")
+                         
+                         // Simple recursion trigger (be careful of loops!)
+                         // This spawns another thread, which is fine.
+                         // But we duplicate the output loop logic here?
+                         // Ideally refactor runCommand logic. 
+                         // FAILURE TO REFACTOR will mean the second command runs but doesn't feed back?
+                         // Actually, this block handles the response parsing. 
+                         // If parseAndApply returns a command, we are NOT running it here!
+                         // The previous implementation in sendMessage handle command loop.
+                         // This handleFollowUp DOES NOT handle the command loop for the *response* of the follow up!
+                         // It only updates UI.
+                         
+                         // Let's implement the command execution for the follow-up response too.
+                         executeCommandChain(nextCommand)
+                     }
                  }
+            }
+        }
+        
+        private fun executeCommandChain(command: String) {
+             ApplicationManager.getApplication().executeOnPooledThread {
+                val terminalService = project.service<com.ronin.service.TerminalService>()
+                
+                SwingUtilities.invokeLater {
+                    appendMessage("System", "Running command (Chain): `$command`\nOutput:")
+                }
+                
+                val output = terminalService.runCommand(command) { line ->
+                    SwingUtilities.invokeLater {
+                        chatArea.append(line)
+                    }
+                }
+                
+                SwingUtilities.invokeLater {
+                    appendMessage("System", "Command Finished.")
+                    val followUpPrompt = "Command Output:\n```\n$output\n```\nIf there are errors, please fix them."
+                    handleFollowUp(followUpPrompt)
+                }
             }
         }
 
