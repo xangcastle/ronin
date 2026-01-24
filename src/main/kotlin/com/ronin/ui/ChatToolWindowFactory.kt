@@ -24,6 +24,9 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private val mainPanel = JPanel(BorderLayout())
         private val chatArea = JTextArea()
         private val inputField = JTextField()
+        
+        // Chat History: List of Maps {"role": "user"/"assistant", "content": "..."}
+        private val messageHistory = mutableListOf<Map<String, String>>()
         private val sendButton = JButton(MyBundle.message("toolwindow.send"))
         private val attachButton = JButton(MyBundle.message("toolwindow.attach"))
         private val clearButton = JButton(MyBundle.message("toolwindow.clear"))
@@ -50,6 +53,8 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 }
             })
             chatArea.isEditable = false
+            chatArea.lineWrap = true
+            chatArea.wrapStyleWord = true
             mainPanel.add(JScrollPane(chatArea), BorderLayout.CENTER)
 
             val bottomPanel = JPanel(BorderLayout())
@@ -119,9 +124,28 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 // Asynchronously call LLM service to avoid freezing UI
                 ApplicationManager.getApplication().executeOnPooledThread {
                     val llmService = project.service<LLMService>()
-                    // Ensure we are using the latest model selection, although it's saved in state on change
-                    val response = llmService.sendMessage(text)
+                    val contextService = project.service<com.ronin.service.ContextService>()
+                    
+                    // Gather Context
+                    val activeFile = contextService.getActiveFileContent()
+                    val projectStructure = contextService.getProjectStructure()
+                    
+                    val contextBuilder = StringBuilder()
+                    if (activeFile != null) {
+                        contextBuilder.append("Active File Content:\n```\n$activeFile\n```\n\n")
+                    }
+                    contextBuilder.append(projectStructure)
+                    
+                    val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
+                    
+                    // Parse and apply changes (side-effect)
+                    com.ronin.service.ResponseParser.parseAndApply(response, project)
+                    
                     appendMessage(MyBundle.message("toolwindow.ronin"), response)
+                    
+                    // Add to history
+                    messageHistory.add(mapOf("role" to "user", "content" to text)) // Note: We might want the FULL prompt with context in history? No, keeps clean. context is re-injected.
+                    messageHistory.add(mapOf("role" to "assistant", "content" to response))
                 }
             }
         }
@@ -158,6 +182,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private fun clearChat() {
             SwingUtilities.invokeLater {
                 chatArea.text = ""
+                messageHistory.clear()
             }
         }
 
