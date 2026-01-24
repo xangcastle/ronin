@@ -72,10 +72,7 @@ class LLMServiceImpl : LLMService {
         }
 
         val model = settings.model.ifBlank { "gpt-4o" }
-        
-        // Build messages JSON array
-        // History contains {"role":.., "content":..} maps
-        // We need to escape them properly
+        val isO1 = model.startsWith("o1")
         
         val messagesBuilder = StringBuilder()
         
@@ -91,19 +88,38 @@ class LLMServiceImpl : LLMService {
         val escapedCurrent = currentPrompt.replace("\"", "\\\"").replace("\n", "\\n")
         messagesBuilder.append("""{"role": "user", "content": "$escapedCurrent"}""")
         
-        val jsonBody = """
+        // O1-specific parameters logic
+        // User requested NO LIMITS.
+        // We omit max_tokens / max_completion_tokens entirely to let the model use its full capacity.
+        
+        // Temperature validation: O1 models require temperature 1 (or default).
+        // Non-O1 models can use lower temperature for coding precision.
+        val isReasoningModel = model.startsWith("o1") || model.contains("gpt-5") // Heuristic for future models
+        
+        val jsonBody = if (isReasoningModel) {
+             """
             {
                 "model": "$model",
-                "max_tokens": 4096,
+                "temperature": 1,
+                "messages": [
+                    $messagesBuilder
+                ]
+            }
+            """.trimIndent()
+        } else {
+             """
+            {
+                "model": "$model",
                 "temperature": 0.1,
                 "messages": [
                     $messagesBuilder
                 ]
             }
-        """.trimIndent()
+            """.trimIndent()
+        }
 
         val request = java.net.http.HttpRequest.newBuilder()
-            .timeout(java.time.Duration.ofSeconds(60))
+            .timeout(java.time.Duration.ofSeconds(300)) // Increased timeout for reasoning models
             .uri(java.net.URI.create("https://api.openai.com/v1/chat/completions"))
             .header("Content-Type", "application/json")
             .header("Authorization", "Bearer $apiKey")
@@ -160,11 +176,8 @@ class LLMServiceImpl : LLMService {
     }
 
     override fun getAvailableModels(provider: String): List<String> {
-        // This is now a simple getter, but typically the UI should call fetchAvailableModels() 
-        // which might cache the result. For now, let's keep the hardcoded list as a fallback
-        // until the async fetch completes.
         return when (provider) {
-            "OpenAI" -> listOf("gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo")
+            "OpenAI" -> listOf("gpt-4o", "o1-preview", "o1-mini", "gpt-4-turbo", "gpt-3.5-turbo")
             "Anthropic" -> listOf("claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307")
             "Google" -> listOf("gemini-1.5-pro", "gemini-1.0-pro")
             "Kimi" -> listOf("moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k")
@@ -173,13 +186,6 @@ class LLMServiceImpl : LLMService {
             else -> listOf("gpt-4o")
         }
     }
-    
-    // Validating against the interface logic which we will update next, but technically 
-    // we need to add this method to the interface first or simultaneously. 
-    // Since I can only edit one file block efficiently, I'll add the implementation here 
-    // and assume I'll update the interface header in a separate tool call if needed
-    // OR I can use multi-replace if I knew the line numbers perfectly.
-    // Let's add the implementation as a new method.
     
     override fun fetchAvailableModels(provider: String): List<String> {
         if (provider != "OpenAI") return getAvailableModels(provider)
@@ -203,8 +209,8 @@ class LLMServiceImpl : LLMService {
                 val pattern = "\"id\"\\s*:\\s*\"([^\"]+)\"".toRegex()
                 pattern.findAll(json).forEach { match ->
                     val id = match.groupValues[1]
-                    // Filter for chat models to avoid clutter
-                    if (id.startsWith("gpt") || id.startsWith("o1")) {
+                    // Filter for chat models to avoid clutter and incompatible models
+                    if ((id.startsWith("gpt") || id.startsWith("o1")) && !id.contains("instruct") && !id.contains("audio") && !id.contains("realtime")) {
                         models.add(id)
                     }
                 }
