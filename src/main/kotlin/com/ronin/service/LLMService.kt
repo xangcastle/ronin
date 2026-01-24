@@ -27,6 +27,9 @@ class LLMServiceImpl : LLMService {
             - You have FULL access to the user's codebase and terminal.
             
             GOAL: Solve the user's request COMPLETELY. Do not stop until the task is done.
+            - If you lack information, SEARCH for it. Do NOT say "I don't have context".
+            - If you need to read a file, use: [EXECUTE: cat <path>]
+            - If you need to see a folder, use: [EXECUTE: ls -R <path>]
             - If you encounter an error, FIX IT immediately. Do not ask for permission.
             - If you modify a file, VERIFY it by running a test command immediately.
             - If a test fails, ANALYZE the output, EDIT the file to fix it, and RERUN the test.
@@ -40,7 +43,7 @@ class LLMServiceImpl : LLMService {
             
             To EXECUTE a terminal command, use:
             [EXECUTE: <command>]
-            (e.g., [EXECUTE: ls -la] or [EXECUTE: bazel test //...])
+            (e.g., [EXECUTE: ls -la] or [EXECUTE: cat src/Main.kt])
             
             Context:
             $context

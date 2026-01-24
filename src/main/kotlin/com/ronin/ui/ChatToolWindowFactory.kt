@@ -28,14 +28,21 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private val chatPanel = JPanel()
         private val scrollPane = com.intellij.ui.components.JBScrollPane(chatPanel)
         
-        private val inputField = JTextField()
+        // New Input Area (Multi-line)
+        private val inputArea = com.intellij.ui.components.JBTextArea()
         
-        // Chat History: List of Maps {"role": "user"/"assistant", "content": "..."}
+        // Chat History
         private val messageHistory = mutableListOf<Map<String, String>>()
-        private val sendButton = JButton(MyBundle.message("toolwindow.send"))
-        private val attachButton = JButton(MyBundle.message("toolwindow.attach"))
-        private val clearButton = JButton(MyBundle.message("toolwindow.clear"))
+        
+        // Controls
+        private val attachButton = JButton(com.intellij.icons.AllIcons.FileTypes.Any_type)
+        // Dynamic Action Button: Stop (when generating) / Reset (when idle)
+        private val actionButton = JButton(com.intellij.icons.AllIcons.Actions.Refresh) // Default to Reset/Refresh
         private val modelComboBox = com.intellij.openapi.ui.ComboBox<String>()
+        
+        // State
+        private var currentTask: java.util.concurrent.Future<*>? = null
+        private var isGenerating = false
 
         companion object {
             private const val KEY = "RoninChatToolWindow"
@@ -57,55 +64,95 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 }
             })
             
-            // Layout Setup
+            // ... (Layout code similar to before)
             chatPanel.layout = BoxLayout(chatPanel, BoxLayout.Y_AXIS)
             chatPanel.background = com.intellij.util.ui.UIUtil.getListBackground()
             chatPanel.border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
             
-            // Align to top
             val wrapperPanel = JPanel(BorderLayout())
             wrapperPanel.add(chatPanel, BorderLayout.NORTH)
             wrapperPanel.background = com.intellij.util.ui.UIUtil.getListBackground()
-            
             scrollPane.setViewportView(wrapperPanel)
-            
-            // Scroll behavior
-            val viewport = scrollPane.viewport
-            // Auto scroll logic can be added here
-            
             mainPanel.add(scrollPane, BorderLayout.CENTER)
 
+            // Bottom Area
             val bottomPanel = JPanel(BorderLayout())
-            bottomPanel.add(inputField, BorderLayout.CENTER)
+            bottomPanel.border = BorderFactory.createEmptyBorder(5, 5, 5, 5)
             
-            val controlsPanel = JPanel(BorderLayout())
+            val controlBar = JPanel(BorderLayout())
+            controlBar.border = BorderFactory.createEmptyBorder(0, 0, 5, 0)
             
-            // Model Selector
-            val modelPanel = JPanel()
-            modelPanel.add(JLabel(MyBundle.message("toolwindow.model")))
-            modelPanel.add(modelComboBox)
-            controlsPanel.add(modelPanel, BorderLayout.WEST)
+            modelComboBox.isOpaque = false
+            
+            val leftControls = JPanel()
+            leftControls.layout = BoxLayout(leftControls, BoxLayout.X_AXIS)
+            leftControls.add(modelComboBox)
+            controlBar.add(leftControls, BorderLayout.WEST)
+            
+            val rightControls = JPanel()
+            rightControls.layout = BoxLayout(rightControls, BoxLayout.X_AXIS)
+            
+            // Configure Action Button
+            actionButton.toolTipText = "Reset Chat"
+            actionButton.addActionListener { 
+                if (isGenerating) {
+                    cancelGeneration()
+                } else {
+                    clearChat()
+                }
+            }
+            // Fix icon size or remove border for cleaner look?
+            // actionButton.border = BorderFactory.createEmptyBorder() 
 
-            // Buttons
-            val buttonPanel = JPanel()
-            buttonPanel.add(attachButton)
-            buttonPanel.add(clearButton)
-            buttonPanel.add(sendButton)
-            controlsPanel.add(buttonPanel, BorderLayout.EAST)
+            attachButton.toolTipText = "Attach Image"
+            attachButton.addActionListener { attachImage() }
+
+            rightControls.add(actionButton)
+            rightControls.add(Box.createHorizontalStrut(5))
+            rightControls.add(attachButton)
             
-            bottomPanel.add(controlsPanel, BorderLayout.SOUTH)
+            controlBar.add(rightControls, BorderLayout.EAST)
             
+            bottomPanel.add(controlBar, BorderLayout.NORTH)
+            
+            // ... (Input Area setup)
+            inputArea.rows = 1
+            inputArea.lineWrap = true
+            inputArea.wrapStyleWord = true
+            inputArea.border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(java.awt.Color.GRAY),
+                BorderFactory.createEmptyBorder(5, 5, 5, 5)
+            )
+            
+            inputArea.addKeyListener(object : java.awt.event.KeyAdapter() {
+                override fun keyPressed(e: java.awt.event.KeyEvent) {
+                    if (e.keyCode == java.awt.event.KeyEvent.VK_ENTER) {
+                        if (e.isShiftDown) {
+                            // Newline
+                        } else {
+                            e.consume()
+                            sendMessage()
+                        }
+                    }
+                }
+            })
+            
+           inputArea.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+                fun updateHeight() {
+                    val rows = inputArea.lineCount.coerceAtMost(10).coerceAtLeast(1)
+                    inputArea.rows = rows
+                    bottomPanel.revalidate() 
+                }
+                override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = updateHeight()
+                override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = updateHeight()
+                override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = updateHeight()
+            })
+
+            bottomPanel.add(inputArea, BorderLayout.CENTER)
             mainPanel.add(bottomPanel, BorderLayout.SOUTH)
 
-            sendButton.addActionListener { sendMessage() }
-            inputField.addActionListener { sendMessage() }
-            attachButton.addActionListener { attachImage() }
-            clearButton.addActionListener { clearChat() }
-            
-            // Initialize models
             updateModelList()
             
-            // Listen for model changes to save state
             modelComboBox.addActionListener {
                 val selected = modelComboBox.selectedItem as? String
                 if (selected != null) {
@@ -118,11 +165,45 @@ class ChatToolWindowFactory : ToolWindowFactory {
             val savedHistory = storageService.getHistory()
             if (savedHistory.isNotEmpty()) {
                 messageHistory.addAll(savedHistory)
-                // Replay messages to UI
                 for (msg in savedHistory) {
                     val role = if (msg["role"] == "user") MyBundle.message("toolwindow.you") else MyBundle.message("toolwindow.ronin")
                     appendMessage(role, msg["content"] ?: "")
                 }
+            }
+            
+            // Initial State Update
+            updateActionButtonState()
+        }
+        
+        private fun updateActionButtonState() {
+             SwingUtilities.invokeLater {
+                if (isGenerating) {
+                    actionButton.icon = com.intellij.icons.AllIcons.Actions.Suspend
+                    actionButton.toolTipText = "Stop Generation"
+                } else {
+                    actionButton.icon = com.intellij.icons.AllIcons.Actions.Refresh // Or GC/Trash
+                    actionButton.toolTipText = "Reset Chat (Keep Settings)"
+                }
+            }
+        }
+        
+        private fun setGenerating(generating: Boolean) {
+            isGenerating = generating
+            updateActionButtonState()
+            
+            SwingUtilities.invokeLater {
+                inputArea.isEnabled = !generating
+                if (!generating) {
+                    inputArea.requestFocusInWindow()
+                }
+            }
+        }
+        
+        private fun cancelGeneration() {
+            if (isGenerating && currentTask != null) {
+                currentTask?.cancel(true)
+                setGenerating(false)
+                appendMessage("System", "🛑 Request cancelled by user.")
             }
         }
         
@@ -131,7 +212,6 @@ class ChatToolWindowFactory : ToolWindowFactory {
             val provider = settings.provider
             val currentModel = settings.model
             
-            // Initial placeholder
             val initialModels = arrayOf(currentModel.ifBlank { "Loading..." })
             modelComboBox.model = DefaultComboBoxModel(initialModels)
             modelComboBox.isEnabled = false
@@ -139,7 +219,6 @@ class ChatToolWindowFactory : ToolWindowFactory {
             val llmService = project.service<LLMService>()
             
             ApplicationManager.getApplication().executeOnPooledThread {
-                // Fetch dynamic list (network call)
                 val modelsList = if (provider == "OpenAI") {
                     try {
                         val fetched = llmService.fetchAvailableModels(provider)
@@ -161,7 +240,6 @@ class ChatToolWindowFactory : ToolWindowFactory {
                         modelComboBox.selectedItem = currentModel
                     } else if (models.isNotEmpty()) {
                         modelComboBox.selectedItem = models[0]
-                        // Update settings default if we switched
                         com.ronin.settings.RoninSettingsState.instance.model = models[0]
                     }
                 }
@@ -169,84 +247,105 @@ class ChatToolWindowFactory : ToolWindowFactory {
         }
 
         private fun sendMessage() {
-            val text = inputField.text
+            val text = inputArea.text.trim()
             if (text.isNotBlank()) {
                 appendMessage(MyBundle.message("toolwindow.you"), text)
-                inputField.text = ""
+                inputArea.text = ""
+                setGenerating(true)
                 
                 // Gather Context on EDT (Required for FileEditorManager)
                 val contextService = project.service<com.ronin.service.ContextService>()
                 val activeFile = contextService.getActiveFileContent()
                 
-                // Asynchronously call LLM service to avoid freezing UI
-                ApplicationManager.getApplication().executeOnPooledThread {
-                    val llmService = project.service<LLMService>()
-                    
-                    // Persist User Message
-                    val storageService = project.service<com.ronin.service.ChatStorageService>()
-                    storageService.addMessage("user", text)
-                    
-                    // Gather Project Structure in Background with Read Lock (Slow operation ok here)
-                    val projectStructure = ReadAction.compute<String, Throwable> { 
-                        contextService.getProjectStructure() 
-                    }
-                    
-                    val contextBuilder = StringBuilder()
-                    if (activeFile != null) {
-                        contextBuilder.append("Active File Content:\n```\n$activeFile\n```\n\n")
-                    }
-                    contextBuilder.append(projectStructure)
-                    
-                    // Send message to LLM
-                    val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
-                    
-                    // Parse: File edits are applied; Command extracted
-                    val result = com.ronin.service.ResponseParser.parseAndApply(response, project)
-                    
-                    appendMessage(MyBundle.message("toolwindow.ronin"), result.text)
-                    messageHistory.add(mapOf("role" to "user", "content" to text))
-                    messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
-                    
-                    // Persist Assistant Message
-                    storageService.addMessage("assistant", result.text)
-                    
-                    // Handle Command Execution Loop
-                    val command = result.commandToRun
-                    if (command != null) {
-                        appendMessage("System", "Running command: `$command`...")
+                // Use a generic executeOnPooledThread, but keep reference for cancellation
+                currentTask = ApplicationManager.getApplication().executeOnPooledThread {
+                    try {
+                        if (Thread.interrupted()) throw InterruptedException()
                         
-                        // Execute in background to avoid freezing UI
-                        executeCommandChain(command)
+                        val llmService = project.service<LLMService>()
+                        
+                        // Persist User Message
+                        val storageService = project.service<com.ronin.service.ChatStorageService>()
+                        storageService.addMessage("user", text)
+                        
+                        // Gather Project Structure
+                        val projectStructure = ReadAction.compute<String, Throwable> { 
+                            contextService.getProjectStructure() 
+                        }
+                        
+                        if (Thread.interrupted()) throw InterruptedException()
+                        
+                        val contextBuilder = StringBuilder()
+                        if (activeFile != null) {
+                            contextBuilder.append("Active File Content:\n```\n$activeFile\n```\n\n")
+                        }
+                        contextBuilder.append(projectStructure)
+                        
+                        // Send message to LLM
+                        val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
+                        
+                        if (Thread.interrupted()) throw InterruptedException()
+                        
+                        // Parse
+                        val result = com.ronin.service.ResponseParser.parseAndApply(response, project)
+                        
+                        appendMessage(MyBundle.message("toolwindow.ronin"), result.text)
+                        messageHistory.add(mapOf("role" to "user", "content" to text))
+                        messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
+                        
+                        storageService.addMessage("assistant", result.text)
+                        
+                        // Handle Command Execution
+                        val command = result.commandToRun
+                        if (command != null) {
+                            appendMessage("System", "Running command: `$command`...")
+                            executeCommandChain(command)
+                        } else {
+                            setGenerating(false)
+                        }
+                    } catch (e: InterruptedException) {
+                        // Cancelled silently or handled by button
+                        setGenerating(false)
+                    } catch (e: Exception) {
+                        appendMessage("System", "Error: ${e.message}")
+                        setGenerating(false)
                     }
                 }
             }
         }
         
         private fun executeCommandChain(command: String) {
-             ApplicationManager.getApplication().executeOnPooledThread {
-                val terminalService = project.service<com.ronin.service.TerminalService>()
-                
-                SwingUtilities.invokeLater {
-                    // Update the last message or add new system block?
-                    // For simply simulation, adding new block is fine.
-                    // appendMessage("System", "Executing: $command")
-                    // We might want a dedicated "Terminal Output" block that grows.
-                    addTerminalBlock(command)
-                }
-                
-                val output = terminalService.runCommand(command) { line ->
+             // We consider command execution part of the "generation" flow, so we track it too?
+             // Or we consider it separate? Let's track it so Stop works on commands too eventually.
+             // For now, simple implementation.
+             
+             val task = ApplicationManager.getApplication().executeOnPooledThread {
+                try {
+                    val terminalService = project.service<com.ronin.service.TerminalService>()
+                    
                     SwingUtilities.invokeLater {
-                        appendToLastTerminalBlock(line)
+                        addTerminalBlock(command)
                     }
-                }
-                
-                SwingUtilities.invokeLater {
-                    appendToLastTerminalBlock("\n[Finished]")
-                    val followUpPrompt = "Command Output:\n```\n$output\n```\nIf there are errors, please fix them."
-                    val summary = "Command executed. Output (${output.lines().size} lines) sent to Ronin."
-                    handleFollowUp(followUpPrompt, summary)
+                    
+                    val output = terminalService.runCommand(command) { line ->
+                        SwingUtilities.invokeLater {
+                            appendToLastTerminalBlock(line)
+                        }
+                    }
+                    
+                    SwingUtilities.invokeLater {
+                        appendToLastTerminalBlock("\n[Finished]")
+                        val followUpPrompt = "Command Output:\n```\n$output\n```\nIf there are errors, please fix them."
+                        val summary = "Command executed. Output (${output.lines().size} lines) sent to Ronin."
+                        handleFollowUp(followUpPrompt, summary)
+                    }
+                } catch (e: Exception) {
+                    setGenerating(false)
                 }
             }
+            // If we want Stop to kill commands, we'd need to track this 'task' too.
+            // For now, replace currentTask
+            currentTask = task
         }
 
         // New UI: Bubble rendering with Responsive Layout
@@ -298,7 +397,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     BorderFactory.createEmptyBorder(8, 12, 8, 12)
                 )
                 
-                // Wrapper to force right/left alignment within the cell not filling full width if small text
+                // Wrapper
                 val bubbleWrapper = JPanel(BorderLayout())
                 bubbleWrapper.isOpaque = false
                 bubbleWrapper.add(textArea, BorderLayout.CENTER)
@@ -322,10 +421,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 if (viewport != null) {
                     val maxW = (viewport.width * 0.85).toInt() // Max 85% width
                     if (maxW > 100) { 
-                        // Simple constraint:
                         if (d.width > maxW) {
-                            // Ideally we would calculate height for this width, but JTextArea is complex.
-                            // Simply constraining width allows basic wrapping.
                              return java.awt.Dimension(maxW, d.height)
                         }
                     }
@@ -333,13 +429,11 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 return d
             }
             
-            // This is crucial for word wrap to work when resized
             override fun getScrollableTracksViewportWidth(): Boolean {
                 return true 
             }
             
             override fun setBounds(x: Int, y: Int, width: Int, height: Int) {
-                // Constrain width
                 val viewport = scrollPane.viewport
                 var w = width
                 if (viewport != null) {
@@ -391,8 +485,6 @@ class ChatToolWindowFactory : ToolWindowFactory {
         
         private fun appendToLastTerminalBlock(text: String) {
             lastTerminalArea?.append(text)
-            // Auto-expand rows if needed? 
-            // JTextArea inside FlowLayout might not expand automatically well without revalidate
             chatPanel.revalidate() 
             // Scroll to bottom
             val bar = scrollPane.verticalScrollBar
@@ -401,59 +493,62 @@ class ChatToolWindowFactory : ToolWindowFactory {
 
         // Helper for the feedback loop
         private fun handleFollowUp(text: String, displayLabel: String) {
-            // Add to UI immediately
              appendMessage(MyBundle.message("toolwindow.you") + " (Auto)", displayLabel)
              
-            ApplicationManager.getApplication().executeOnPooledThread {
-                // Re-run the send logic (minus the input field clearing part)
-                val settings = com.ronin.settings.RoninSettingsState.instance
-                val apiKeyName = if (settings.provider == "Anthropic") "anthropicApiKey" else "openaiApiKey"
-                
-                // Retrieve API Key in background thread to avoid "Slow operations are prohibited on EDT"
-                val apiKey = com.ronin.settings.CredentialHelper.getApiKey(apiKeyName)
-                
-                if (apiKey.isNullOrBlank()) {
-                    appendMessage("System", "Error: API Key missing for follow-up.")
-                    return@executeOnPooledThread
-                }
-                
-                val llmService = project.service<LLMService>()
-                
-                // Gather Context on EDT
-                val contextService = project.service<com.ronin.service.ContextService>()
-                val activeFile = contextService.getActiveFileContent()
-                
-                // Gather Project Structure in Background with Read Lock
-                val projectStructure = ReadAction.compute<String, Throwable> { 
-                    contextService.getProjectStructure() 
-                }
-                
-                val contextBuilder = StringBuilder()
-                 // Reuse previous context or fetch fresh? Fresh is safer if file changed.
-                 if (activeFile != null) {
-                    contextBuilder.append("Active File Content:\n```\n$activeFile\n```\n\n")
-                 }
-                 contextBuilder.append(projectStructure)
-                 
-                 val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
-                 val result = com.ronin.service.ResponseParser.parseAndApply(response, project)
-                 
-                 SwingUtilities.invokeLater {
-                    appendMessage(MyBundle.message("toolwindow.ronin"), result.text)
-                    messageHistory.add(mapOf("role" to "user", "content" to text))
-                    messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
-                     
-                    // Persist Messages (User Auto + Assistant)
-                    val storageService = project.service<com.ronin.service.ChatStorageService>()
-                    storageService.addMessage("user", text)
-                    storageService.addMessage("assistant", result.text)
-                     
-                     // If there's ANOTHER command, handle it
-                     val nextCommand = result.commandToRun
-                     if (nextCommand != null) {
-                         executeCommandChain(nextCommand)
+            currentTask = ApplicationManager.getApplication().executeOnPooledThread {
+                try {
+                    if (Thread.interrupted()) throw InterruptedException()
+
+                    val settings = com.ronin.settings.RoninSettingsState.instance
+                    val apiKeyName = if (settings.provider == "Anthropic") "anthropicApiKey" else "openaiApiKey"
+                    val apiKey = com.ronin.settings.CredentialHelper.getApiKey(apiKeyName)
+                    
+                    if (apiKey.isNullOrBlank()) {
+                        appendMessage("System", "Error: API Key missing for follow-up.")
+                        setGenerating(false)
+                        return@executeOnPooledThread
+                    }
+                    
+                    val llmService = project.service<LLMService>()
+                    
+                    val contextService = project.service<com.ronin.service.ContextService>()
+                    val activeFile = contextService.getActiveFileContent()
+                    
+                    val projectStructure = ReadAction.compute<String, Throwable> { 
+                        contextService.getProjectStructure() 
+                    }
+                    
+                    val contextBuilder = StringBuilder()
+                     if (activeFile != null) {
+                        contextBuilder.append("Active File Content:\n```\n$activeFile\n```\n\n")
                      }
-                 }
+                     contextBuilder.append(projectStructure)
+                     
+                     if (Thread.interrupted()) throw InterruptedException()
+
+                     val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
+                     val result = com.ronin.service.ResponseParser.parseAndApply(response, project)
+                     
+                     SwingUtilities.invokeLater {
+                        appendMessage(MyBundle.message("toolwindow.ronin"), result.text)
+                        messageHistory.add(mapOf("role" to "user", "content" to text))
+                        messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
+                         
+                        val storageService = project.service<com.ronin.service.ChatStorageService>()
+                        storageService.addMessage("user", text)
+                        storageService.addMessage("assistant", result.text)
+                         
+                         // If there's ANOTHER command, handle it
+                         val nextCommand = result.commandToRun
+                         if (nextCommand != null) {
+                             executeCommandChain(nextCommand)
+                         } else {
+                             setGenerating(false)
+                         }
+                     }
+                } catch (e: Exception) {
+                    setGenerating(false)
+                }
             }
         }
 
@@ -468,12 +563,10 @@ class ChatToolWindowFactory : ToolWindowFactory {
         }
 
         private fun attachImage() {
-            // chatArea.append(MyBundle.message("toolwindow.system.image_mock"))
             appendMessage("System", "[Image attached]")
         }
 
         fun getContent(): JComponent {
-            // Refresh models in case settings changed while window was closed/hidden
             updateModelList() 
             return mainPanel
         }
