@@ -37,7 +37,22 @@ abstract class BaseRoninAction : AnAction() {
             // 3. Call Service
             com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
                 val llmService = project.service<LLMService>()
-                val response = llmService.sendMessage(prompt)
+                val contextService = project.service<com.ronin.service.ContextService>()
+
+                // Gather Context
+                val activeFile = contextService.getActiveFileContent()
+                val projectStructure = contextService.getProjectStructure()
+
+                val contextBuilder = StringBuilder()
+                if (activeFile != null) {
+                    contextBuilder.append("Active File Content:\n```\n$activeFile\n```\n\n")
+                }
+                contextBuilder.append(projectStructure)
+
+                val response = llmService.sendMessage(prompt, contextBuilder.toString(), emptyList())
+                
+                // Parse and apply changes (side-effect)
+                com.ronin.service.ResponseParser.parseAndApply(response, project)
                 
                 // 4. Append Response
                 chatWindow?.appendMessage(MyBundle.message("toolwindow.ronin"), response)

@@ -50,3 +50,56 @@ Ronin doesn't have a hidden agenda or a "fair usage policy" designed to slow you
 
 ---
 *Build freely.*
+
+## 🏗️ Project Structure
+
+The codebase is organized into clear functional components:
+
+*   **`src/main/kotlin/com/ronin/actions`**: Entry points for user interactions (e.g., `ExplainCodeAction`, `FixCodeAction`).
+*   **`src/main/kotlin/com/ronin/ui`**: Manages the Tool Window, Chat UI, and message history.
+*   **`src/main/kotlin/com/ronin/service`**: The agent's core logic:
+    *   **`LLMService`**: Communicates with AI providers (OpenAI, etc.).
+    *   **`ContextService`**: Reads the active file and project structure to give the agent context.
+    *   **`EditService`**: Safely modifies files in the editor using the IntelliJ SDK.
+    *   **`ResponseParser`**: Detects file update commands in the AI's response.
+*   **`src/main/kotlin/com/ronin/settings`**: Manages user configuration (API keys, models).
+
+## 🧠 Chat Architecture
+
+How Ronin processes and acts on your requests:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Chat Tool Window
+    participant Context as ContextService
+    participant Service as LLM Service
+    participant Provider as LLM Provider
+    participant Parser as ResponseParser
+    participant Edit as EditService
+
+    User->>UI: Sends Message
+    UI->>Context: getActiveFile() & getProjectStructure()
+    Context-->>UI: Returns Context
+    UI->>Service: sendMessage(prompt + context + history)
+    Service->>Provider: HTTP Request
+    Provider-->>Service: JSON Response ("... [UPDATED_FILE] ...")
+    Service-->>UI: Returns Full Text
+    UI->>Parser: parseAndApply(response)
+    alt Contains Editing Command
+        Parser->>Edit: replaceFileContent()
+        Edit-->>UI: File Updated in Editor
+    end
+    UI-->>User: Displays Response
+```
+
+## 🗺️ Roadmap
+
+- [x] **Core Architecture**: Plugin skeleton and basic tool window.
+- [x] **Chat Interface**: Functional chat UI with history.
+- [x] **OpenAI Integration**: Live connection to OpenAI API.
+- [x] **Context Awareness**: Agent "sees" your active file and folder structure.
+- [x] **File Modification**: Agent can write code directly to your files.
+- [ ] **Multi-Provider Support**: Full implementation for Anthropic, Gemini, Ollama (currently mocked).
+- [ ] **Chat Persistence**: Save chat history across IDE restarts.
+- [ ] **Multimodal Support**: Real image attachment processing.

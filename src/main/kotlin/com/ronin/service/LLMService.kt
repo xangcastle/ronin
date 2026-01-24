@@ -4,60 +4,91 @@ package com.ronin.service
 
 
 interface LLMService {
-    fun sendMessage(prompt: String, images: List<String> = emptyList()): String
+    fun sendMessage(prompt: String, context: String? = null, history: List<Map<String, String>> = emptyList(), images: List<String> = emptyList()): String
     fun getAvailableModels(provider: String): List<String>
 }
 
 class LLMServiceImpl : LLMService {
     private val client = java.net.http.HttpClient.newHttpClient()
 
-    override fun sendMessage(prompt: String, images: List<String>): String {
+    override fun sendMessage(prompt: String, context: String?, history: List<Map<String, String>>, images: List<String>): String {
         val settings = com.ronin.settings.RoninSettingsState.instance
         
-        if (settings.provider == "OpenAI") {
-            return sendOpenAIRequest(prompt, settings)
+        // Context is only added to the LATEST prompt if provided, or maybe as a system message?
+        // Let's add it to the latest user message for now.
+        val fullPrompt = if (context != null) {
+            """
+            System Instructions:
+            You are Ronin, an intelligent coding agent.
+            You have access to the user's codebase.
+            To UPDATE a file, you MUST use the following format:
+            [UPDATED_FILE: <path_to_file>]
+            ```<language>
+            ... full content of the file ...
+            ```
+            
+            Context:
+            $context
+            
+            User Request: $prompt
+            """.trimIndent()
+        } else {
+            prompt
         }
 
-        // Keep mock behavior for other providers for now
-        // Simulate network delay to test UI responsiveness
-        try {
-            Thread.sleep(1000)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
+        if (settings.provider == "OpenAI") {
+            return sendOpenAIRequest(fullPrompt, history, settings)
         }
         
-        val apiKeyName = when(settings.provider) {
+        // ... (mock implementation omitted for brevity, assume similar)
+         val apiKeyName = when(settings.provider) {
             "Anthropic" -> "anthropicApiKey"
-            "Google" -> "googleApiKey"
-            "Kimi" -> "kimiApiKey"
-            "Minimax" -> "minimaxApiKey"
             else -> "openaiApiKey"
         }
         val apiKey = com.ronin.settings.CredentialHelper.getApiKey(apiKeyName)
         val hasKey = if (!apiKey.isNullOrBlank()) "Yes" else "No"
-        
-        return "Rank: Mock Response\nProvider: ${settings.provider}\nModel: ${settings.model}\nAPI Key Present: $hasKey\n\nEcho: $prompt"
+        return "Rank: Mock Response ($hasKey)"
     }
 
-    private fun sendOpenAIRequest(prompt: String, settings: com.ronin.settings.RoninSettingsState): String {
+    private fun sendOpenAIRequest(currentPrompt: String, history: List<Map<String, String>>, settings: com.ronin.settings.RoninSettingsState): String {
         val apiKey = com.ronin.settings.CredentialHelper.getApiKey("openaiApiKey")
         if (apiKey.isNullOrBlank()) {
             return "Error: OpenAI API Key not found. Please configure it in Settings."
         }
 
         val model = settings.model.ifBlank { "gpt-4o" }
-        val escapedPrompt = prompt.replace("\"", "\\\"").replace("\n", "\\n")
+        
+        // Build messages JSON array
+        // History contains {"role":.., "content":..} maps
+        // We need to escape them properly
+        
+        val messagesBuilder = StringBuilder()
+        
+        // Add history
+        for (msg in history) {
+            val role = msg["role"] ?: "user"
+            val content = msg["content"] ?: ""
+            val escapedContent = content.replace("\"", "\\\"").replace("\n", "\\n")
+            messagesBuilder.append("""{"role": "$role", "content": "$escapedContent"},""")
+        }
+        
+        // Add current message
+        val escapedCurrent = currentPrompt.replace("\"", "\\\"").replace("\n", "\\n")
+        messagesBuilder.append("""{"role": "user", "content": "$escapedCurrent"}""")
         
         val jsonBody = """
             {
                 "model": "$model",
+                "max_tokens": 4096,
+                "temperature": 0.1,
                 "messages": [
-                    {"role": "user", "content": "$escapedPrompt"}
+                    $messagesBuilder
                 ]
             }
         """.trimIndent()
 
         val request = java.net.http.HttpRequest.newBuilder()
+            .timeout(java.time.Duration.ofSeconds(60))
             .uri(java.net.URI.create("https://api.openai.com/v1/chat/completions"))
             .header("Content-Type", "application/json")
             .header("Authorization", "Bearer $apiKey")
@@ -79,10 +110,38 @@ class LLMServiceImpl : LLMService {
     }
 
     private fun extractContentFromResponse(json: String): String {
-        // Simple regex extraction to avoid external JSON dependency issues
-        val contentPattern = "\"content\"\\s*:\\s*\"(.*?)\"".toRegex(RegexOption.DOT_MATCHES_ALL)
-        val match = contentPattern.find(json)
-        return match?.groups?.get(1)?.value?.replace("\\n", "\n")?.replace("\\\"", "\"") ?: json
+        // Manual parsing to avoid StackOverflowError with regex on large responses
+        val key = "\"content\""
+        var startIndex = json.indexOf(key)
+        if (startIndex == -1) return json
+        
+        // Move past "content"
+        startIndex += key.length
+        
+        // Find the start quote of the value
+        val quoteStart = json.indexOf("\"", startIndex)
+        if (quoteStart == -1) return json
+        
+        // Iterate to find the matching end quote, handling escapes
+        var current = quoteStart + 1
+        while (current < json.length) {
+            when (json[current]) {
+                '\\' -> {
+                    // Skip the next character (escaped)
+                    current += 2
+                }
+                '"' -> {
+                    // Found the end
+                    val content = json.substring(quoteStart + 1, current)
+                    return content.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
+                }
+                else -> {
+                    current++
+                }
+            }
+        }
+        
+        return json
     }
 
     override fun getAvailableModels(provider: String): List<String> {
