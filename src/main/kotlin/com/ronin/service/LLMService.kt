@@ -1,14 +1,14 @@
 package com.ronin.service
 
 
-import com.intellij.openapi.project.Project
+
 
 interface LLMService {
     fun sendMessage(prompt: String, images: List<String> = emptyList()): String
     fun getAvailableModels(provider: String): List<String>
 }
 
-class LLMServiceImpl(private val project: Project) : LLMService {
+class LLMServiceImpl : LLMService {
     private val client = java.net.http.HttpClient.newHttpClient()
 
     override fun sendMessage(prompt: String, images: List<String>): String {
