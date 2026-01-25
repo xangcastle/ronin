@@ -11,44 +11,73 @@ import java.io.File
 @Service(Service.Level.PROJECT)
 class EditService(private val project: Project) {
 
-    fun replaceFileContent(path: String, newContent: String): String {
-        var result = "Unknown error"
+    data class EditOperation(val path: String, val search: String?, val replace: String)
+
+    fun applyEdits(operations: List<EditOperation>): List<String> {
+        val results = mutableListOf<String>()
         
         WriteCommandAction.runWriteCommandAction(project) {
-            try {
-                var virtualFile = findFile(path)
-                
-                if (virtualFile == null) {
-                    // Try to create the file
-                    val success = createFile(path)
-                    if (success != null) {
-                        virtualFile = success
-                        result = "Created new file: $path"
-                    } else {
-                        result = "Error: File not found and could not be created: $path"
-                        return@runWriteCommandAction
+            for (op in operations) {
+                try {
+                    var virtualFile = findFile(op.path)
+                    
+                    if (virtualFile == null) {
+                        // Create file if it doesn't exist
+                        val created = createFile(op.path)
+                        if (created != null) {
+                            virtualFile = created
+                            results.add("Created new file: ${op.path}")
+                        } else {
+                            results.add("Error: Could not create file: ${op.path}")
+                            continue
+                        }
                     }
-                }
-                
-                if (virtualFile != null) {
-                    val document = FileDocumentManager.getInstance().getDocument(virtualFile)
-                    if (document != null) {
-                        document.setText(newContent)
-                        FileDocumentManager.getInstance().saveDocument(document)
-                        if (result == "Unknown error") result = "Updated file: $path"
-                    } else {
-                        // Binary file or not text?
-                        // Try VFS direct write
-                        virtualFile.setBinaryContent(newContent.toByteArray())
-                        if (result == "Unknown error") result = "Updated file (binary/VFS): $path"
+                    
+                    if (virtualFile != null) {
+                        val document = FileDocumentManager.getInstance().getDocument(virtualFile)
+                        if (document != null) {
+                            val text = document.text
+                            
+                            if (op.search.isNullOrEmpty()) {
+                                // Full replacement or rewrite (if search is missing)
+                                // Or purely appending? For safety, let's treat null search as "Overwrite/Set Content" 
+                                // if the file is new, or if explicitly desired. 
+                                // But usually surgical edits imply search. 
+                                // If search is null, we assume we overwrite the whole file content.
+                                document.setText(op.replace)
+                                results.add("Overwrote file: ${op.path}")
+                            } else {
+                                // Surgical Search & Replace
+                                // Normalize line endings for comparison?
+                                val idx = text.indexOf(op.search)
+                                if (idx != -1) {
+                                    document.replaceString(idx, idx + op.search.length, op.replace)
+                                    results.add("Updated file: ${op.path}")
+                                } else {
+                                    // Try fuzzy match or reporting error?
+                                    // For now, robust error behavior.
+                                    results.add("Error: Could not find search block in ${op.path}")
+                                }
+                            }
+                            FileDocumentManager.getInstance().saveDocument(document)
+                        } else {
+                             // Binary or not loaded
+                             virtualFile.setBinaryContent(op.replace.toByteArray())
+                             results.add("Updated binary/VFS file: ${op.path}")
+                        }
                     }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    results.add("Exception updating ${op.path}: ${e.message}")
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                result = "Error updating file: ${e.message}"
             }
         }
-        return result
+        return results
+    }
+
+    // Legacy method for full replace (keep for now or delegate)
+    fun replaceFileContent(path: String, newContent: String): String {
+        return applyEdits(listOf(EditOperation(path, null, newContent))).firstOrNull() ?: "Error"
     }
 
     fun findFile(path: String): VirtualFile? {
@@ -67,13 +96,18 @@ class EditService(private val project: Project) {
             if (relativeFile != null) return relativeFile
         }
         
+        // Handle case where file doesn't exist yet but path is intended relative
         return null
     }
     
-    private fun createFile(path: String): VirtualFile? {
+    internal fun createFile(path: String): VirtualFile? {
         val cleanPath = path.replace("\\", "/").removePrefix("./")
-        val basePath = project.basePath ?: return null
-        val fullPath = if (File(cleanPath).isAbsolute) cleanPath else "$basePath/$cleanPath"
+        val isAbs = File(cleanPath).isAbsolute
+        val basePath = project.basePath
+        
+        if (!isAbs && basePath == null) return null
+        
+        val fullPath = if (isAbs) cleanPath else "$basePath/$cleanPath"
         
         try {
             val file = File(fullPath)

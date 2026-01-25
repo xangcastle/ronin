@@ -31,32 +31,31 @@ class LLMServiceImpl : LLMService {
             - You CAN and SHOULD execute ANY installed CLI tool (e.g., $allowedTools).
             - **NEVER** refuse to run a command claiming you "don't have access" or "can't connect to the cluster". 
             - If the user asks you to check something, **RUN THE COMMAND**.
-            1. **PLAN**: Analyze the request. What files need to change? What commands need to run?
-            2. **EXECUTE**: Use the available tools to apply changes and run commands. 
-               - Do NOT just "suggest" code. YOU must update the files.
-               - Do NOT ask the user to run commands. YOU run them.
-            3. **VERIFY**: After every change, run a test or build command to verify it works.
-               - If it fails, fix it immediately. Step 2 and 3 should form a loop.
-            4. **REPORT**: When finished, provide a concise summary with emojis 🧠 of what you did.
+
+            **OUTPUT FORMAT:**
+            You must respond with a JSON object strictly matching the schema:
+            {
+              "explanation": "Summary of what you are doing",
+              "commands": ["ls -la", "./gradlew test"],
+              "edits": [
+                {
+                  "path": "/abs/path/to/file",
+                  "search": "code block to find",
+                  "replace": "replacement code block"
+                }
+              ]
+            }
+
+            **EDITING RULES (Surgical Edits):**
+            - To EDIT a file, provide the `search` block (exact match) and the `replace` block.
+            - The `search` block must be unique in the file.
+            - To CREATE or OVERWRITE a file entirely, keep `search` null or empty.
+            - Do NOT re-write the whole file if you only need to change one function.
             
-            AVAILABLE TOOLS:
-            
-            1. **Update File**:
-               [UPDATED_FILE: /absolute/path/to/file]
-               ```<language>
-               ... new content ...
-               ```
-               *Use this to modify code. Write the FULL file content.*
-               
-            2. **Execute Command**:
-               [EXECUTE: command args...]
-               *Use this to run terminal commands (ls, cat, grep, ./gradlew test, etc).*
-               *Always check the output of your commands!*
-               
-            IMPORTANT RULES:
-            - **Be Proactive**: If you need info, use `[EXECUTE: ls]` or `[EXECUTE: cat]`. Don't ask unless stuck.
-            - **Be thorough**: Don't leave placeholders. Write production-ready code.
-            - ** verify**: Never claim a task is done without running a verification command (test, build, or lint).
+            **CORE WORKFLOW:**
+            1. **PLAN**: Analyze request.
+            2. **EXECUTE**: Return the JSON with commands and edits.
+            3. **VERIFY**: Always include a verification command (test/build) in the `commands` list.
             
             Context:
             $context
@@ -66,6 +65,8 @@ class LLMServiceImpl : LLMService {
         } else {
             prompt
         }
+        
+        // ...
 
         if (settings.provider == "OpenAI") {
             return sendOpenAIRequest(fullPrompt, history, settings)
@@ -124,7 +125,49 @@ class LLMServiceImpl : LLMService {
         
         val requestBody = mutableMapOf<String, Any>(
             "model" to model,
-            "messages" to messages
+            "messages" to messages,
+            "response_format" to mapOf(
+                "type" to "json_schema",
+                "json_schema" to mapOf(
+                    "name" to "RoninResponse",
+                    "strict" to true,
+                    "schema" to mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "explanation" to mapOf(
+                                "type" to "string",
+                                "description" to "Concise summary of changes and reasoning."
+                            ),
+                            "commands" to mapOf(
+                                "type" to "array",
+                                "items" to mapOf("type" to "string"),
+                                "description" to "Terminal commands to run (e.g. tests)."
+                            ),
+                            "edits" to mapOf(
+                                "type" to "array",
+                                "items" to mapOf(
+                                    "type" to "object",
+                                    "properties" to mapOf(
+                                        "path" to mapOf("type" to "string"),
+                                        "search" to mapOf(
+                                            "type" to "string",
+                                            "description" to "Exact code block to replace. Null/empty for new files/overwrite."
+                                        ),
+                                        "replace" to mapOf(
+                                            "type" to "string",
+                                            "description" to "New code block."
+                                        )
+                                    ),
+                                    "required" to listOf("path", "replace", "search"),
+                                    "additionalProperties" to false
+                                )
+                            )
+                        ),
+                        "required" to listOf("explanation", "commands", "edits"),
+                        "additionalProperties" to false
+                    )
+                )
+            )
         )
         
         if (isReasoningModel) {

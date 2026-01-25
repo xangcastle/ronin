@@ -317,7 +317,6 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private fun executeCommandChain(command: String) {
              // We consider command execution part of the "generation" flow, so we track it too?
              // Or we consider it separate? Let's track it so Stop works on commands too eventually.
-             // For now, simple implementation.
              
              val task = ApplicationManager.getApplication().executeOnPooledThread {
                 try {
@@ -327,13 +326,44 @@ class ChatToolWindowFactory : ToolWindowFactory {
                         addTerminalBlock(command)
                     }
                     
+                    // Buffer for output to avoid flooding EDT
+                    val outputBuffer = StringBuilder()
+                    val lock = Any()
+                    var updateScheduled = false
+                    
                     val output = terminalService.runCommand(command) { line ->
-                        SwingUtilities.invokeLater {
-                            appendToLastTerminalBlock(line)
+                        synchronized(lock) {
+                            outputBuffer.append(line)
+                            if (!updateScheduled) {
+                                updateScheduled = true
+                                // Throttle updates to ~10fps max to keep UI responsive
+                                val timer = Timer(100) {
+                                    val textToAppend: String
+                                    synchronized(lock) {
+                                        textToAppend = outputBuffer.toString()
+                                        outputBuffer.clear()
+                                        updateScheduled = false
+                                    }
+                                    if (textToAppend.isNotEmpty()) {
+                                        appendToLastTerminalBlock(textToAppend)
+                                    }
+                                }
+                                timer.isRepeats = false
+                                timer.start()
+                            }
                         }
                     }
                     
+                    // Flush remaining
                     SwingUtilities.invokeLater {
+                        val remaining: String
+                        synchronized(lock) {
+                           remaining = outputBuffer.toString()
+                        }
+                        if (remaining.isNotEmpty()) {
+                            appendToLastTerminalBlock(remaining)
+                        }
+                        
                         appendToLastTerminalBlock("\n[Finished]")
                         val followUpPrompt = "Command Output:\n```\n$output\n```\nIf there are errors, please fix them."
                         val summary = "Command executed. Output (${output.lines().size} lines) sent to Ronin."
