@@ -19,6 +19,7 @@ class RoninSettingsConfigurable : Configurable {
     private val kimiApiKeyField = JBPasswordField()
     private val minimaxApiKeyField = JBPasswordField()
     private val ollamaBaseUrlField = JBTextField()
+    private val allowedToolsField = JBTextField()
     
     private val providerComboBox = ComboBox(arrayOf("OpenAI", "Anthropic", "Google", "Kimi", "Minimax", "Ollama"))
 
@@ -35,6 +36,7 @@ class RoninSettingsConfigurable : Configurable {
             .addLabeledComponent(JLabel(MyBundle.message("settings.minimax_key")), minimaxApiKeyField)
             .addSeparator()
             .addLabeledComponent(JLabel(MyBundle.message("settings.ollama_url")), ollamaBaseUrlField)
+            .addLabeledComponent(JLabel(MyBundle.message("settings.allowed_tools")), allowedToolsField)
             .addComponentFillVertically(JPanel(), 0)
             .panel
         
@@ -49,6 +51,7 @@ class RoninSettingsConfigurable : Configurable {
                 String(kimiApiKeyField.password) != (CredentialHelper.getApiKey("kimiApiKey") ?: "") ||
                 String(minimaxApiKeyField.password) != (CredentialHelper.getApiKey("minimaxApiKey") ?: "") ||
                 ollamaBaseUrlField.text != settings.ollamaBaseUrl ||
+                allowedToolsField.text != settings.allowedTools ||
                 (providerComboBox.selectedItem as? String ?: "OpenAI") != settings.provider
     }
 
@@ -60,6 +63,7 @@ class RoninSettingsConfigurable : Configurable {
         CredentialHelper.setApiKey("kimiApiKey", String(kimiApiKeyField.password))
         CredentialHelper.setApiKey("minimaxApiKey", String(minimaxApiKeyField.password))
         settings.ollamaBaseUrl = ollamaBaseUrlField.text
+        settings.allowedTools = allowedToolsField.text
         settings.provider = providerComboBox.selectedItem as? String ?: "OpenAI"
         val messageBus = com.intellij.openapi.application.ApplicationManager.getApplication().messageBus
         messageBus.syncPublisher(RoninSettingsNotifier.TOPIC).settingsChanged(settings)
@@ -73,6 +77,7 @@ class RoninSettingsConfigurable : Configurable {
         kimiApiKeyField.text = CredentialHelper.getApiKey("kimiApiKey") ?: ""
         minimaxApiKeyField.text = CredentialHelper.getApiKey("minimaxApiKey") ?: ""
         ollamaBaseUrlField.text = settings.ollamaBaseUrl
+        allowedToolsField.text = settings.allowedTools
         providerComboBox.selectedItem = settings.provider
     }
 

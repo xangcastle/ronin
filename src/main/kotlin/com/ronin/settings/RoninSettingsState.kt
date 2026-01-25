@@ -14,6 +14,7 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
     
     var model: String = "gpt-4o"
     var provider: String = "OpenAI"
+    var allowedTools: String = "git, podman, kubectl, argocd, aws, bazel"
 
     // Legacy fields for migration
     var openaiApiKey: String? = null
@@ -30,6 +31,7 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
         this.ollamaBaseUrl = state.ollamaBaseUrl
         this.model = state.model
         this.provider = state.provider
+        this.allowedTools = state.allowedTools
 
         // Migrate keys to PasswordSafe if found in XML
         migrateKey("openaiApiKey", state.openaiApiKey)
