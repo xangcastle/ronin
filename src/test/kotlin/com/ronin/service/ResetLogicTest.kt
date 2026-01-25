@@ -15,20 +15,19 @@ class ResetLogicTest : BasePlatformTestCase() {
         // 1. Simulate Active State
         historyService.addMessage("user", "Hello")
         historyService.addMessage("assistant", "Hi")
-        sessionService.updatePlan("Step 1: Save the world.")
+        sessionService.addMessage("user", "Hello")
+        sessionService.addMessage("assistant", "Hi")
         
         // Assert State is "Dirty"
         assertEquals(2, historyService.getHistory().size)
-        assertTrue(sessionService.hasPlan())
-        assertNotNull(sessionService.currentPlan)
+        assertEquals(2, sessionService.getHistory().size)
         
         // 2. Execute Reset Logic (mimicking ChatToolWindowFactory.clearChat)
         historyService.clearHistory()
-        sessionService.clearPlan()
+        sessionService.clearSession()
         
         // 3. Assert State is "Clean"
         assertEquals("History should be empty", 0, historyService.getHistory().size)
-        assertFalse("Plan should be cleared", sessionService.hasPlan())
-        assertNull("Current plan should be null", sessionService.currentPlan)
+        assertEquals("Session history should be cleared", 0, sessionService.getHistory().size)
     }
 }

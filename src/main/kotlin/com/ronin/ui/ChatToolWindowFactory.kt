@@ -313,6 +313,9 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     val llmService = project.service<LLMService>()
                     
                     val storageService = project.service<com.ronin.service.ChatStorageService>()
+                    
+                    // Add to history BEFORE sending to LLM
+                    messageHistory.add(mapOf("role" to "user", "content" to text))
                     storageService.addMessage("user", text)
                     
                     val projectStructure = ReadAction.compute<String, Throwable> { 
@@ -331,21 +334,25 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     
                     val result = com.ronin.service.ResponseParser.parseAndApply(response, project)
                     
-                    val resultTextWithCommand = if (result.commandToRun != null) {
-                        "${result.text}\n\n[Action: Running `${result.commandToRun}`]"
-                    } else {
-                        result.text
+                    if (!result.scratchpad.isNullOrBlank()) {
+                        appendMessage("Ronin Thinking", result.scratchpad)
                     }
-
-                    appendMessage(MyBundle.message("toolwindow.ronin"), result.text)
-                    messageHistory.add(mapOf("role" to "user", "content" to text))
-                    messageHistory.add(mapOf("role" to "assistant", "content" to resultTextWithCommand))
-                    storageService.addMessage("assistant", resultTextWithCommand)
+                    
+                    val displayedMsg = if (result.toolOutput != null) "${result.text}\n\n${result.toolOutput}" else result.text
+                    appendMessage(MyBundle.message("toolwindow.ronin"), displayedMsg)
+                    
+                    // History Cleanup: Save ONLY the agent text, not the potentially huge tool output
+                    messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
+                    storageService.addMessage("assistant", result.text)
                     
                     val command = result.commandToRun
                     if (command != null) {
                         appendMessage("System", "Running command: `$command`...")
                         executeCommandChain(command)
+                    } else if (result.requiresFollowUp) {
+                        val followUpPrompt = "The action was completed. Here is the output:\n```\n${result.toolOutput ?: result.text}\n```\nAnalyze this and continue."
+                        val followUpSummary = "File action complete."
+                        handleFollowUp(followUpPrompt, followUpSummary)
                     } else {
                         setGenerating(false)
                     }
@@ -393,8 +400,8 @@ class ChatToolWindowFactory : ToolWindowFactory {
                         synchronized(lock) { remaining = outputBuffer.toString() }
                         if (remaining.isNotEmpty()) appendToLastTerminalBlock(remaining)
                         appendToLastTerminalBlock("\n[Finished]")
-                        val followUpPrompt = "Command Output:\n```\n$output\n```\nAnalyze result."
-                        val summary = "Command output sent."
+                        val followUpPrompt = "The output of your last command [`$command`] was:\n```\n$output\n```\nAnalyze this output and decide on the next step."
+                        val summary = "Command output received."
                         handleFollowUp(followUpPrompt, summary)
                     }
                 } catch (e: Exception) {
@@ -408,6 +415,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
             SwingUtilities.invokeLater {
                 val isMe = role == MyBundle.message("toolwindow.you") || role.contains("You")
                 val isSystem = role == "System"
+                val isThinking = role == "Ronin Thinking"
                 val rowPanel = JPanel(java.awt.GridBagLayout())
                 rowPanel.isOpaque = false
                 val c = java.awt.GridBagConstraints()
@@ -434,6 +442,11 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     textArea.background = java.awt.Color(40, 44, 52) 
                     textArea.foreground = java.awt.Color(171, 178, 191)
                     textArea.font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 12)
+                } else if (isThinking) {
+                    textArea.background = com.intellij.util.ui.UIUtil.getPanelBackground()
+                    textArea.foreground = java.awt.Color(150, 150, 150)
+                    textArea.font = java.awt.Font(textArea.font.name, java.awt.Font.ITALIC, 11)
+                    textArea.border = BorderFactory.createLineBorder(java.awt.Color(200, 200, 200, 50), 1)
                 } else {
                     textArea.background = com.intellij.util.ui.UIUtil.getPanelBackground()
                     textArea.foreground = com.intellij.util.ui.UIUtil.getLabelForeground()
@@ -525,21 +538,38 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     if (activeFile != null) contextBuilder.append("Active File:\n```\n$activeFile\n```\n\n")
                     contextBuilder.append(projectStructure)
                     val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
+                    if (Thread.interrupted()) throw InterruptedException()
+                    
+                    val storageService = project.service<com.ronin.service.ChatStorageService>()
+                    // Add to history BEFORE LLM call for handleFollowUp too
+                    messageHistory.add(mapOf("role" to "user", "content" to text))
+                    storageService.addMessage("user", text)
+                    
                     val result = com.ronin.service.ResponseParser.parseAndApply(response, project)
-                    val resultTextWithCommand = if (result.commandToRun != null) {
-                        "${result.text}\n\n[Action: Running `${result.commandToRun}`]"
-                    } else {
-                        result.text
+                    
+                    if (!result.scratchpad.isNullOrBlank()) {
+                        appendMessage("Ronin Thinking", result.scratchpad)
                     }
                     
+                    val displayedMsg = if (result.toolOutput != null) "${result.text}\n\n${result.toolOutput}" else result.text
+                    
                     SwingUtilities.invokeLater {
-                        appendMessage(MyBundle.message("toolwindow.ronin"), result.text)
-                        messageHistory.add(mapOf("role" to "user", "content" to text))
-                        messageHistory.add(mapOf("role" to "assistant", "content" to resultTextWithCommand))
-                        project.service<com.ronin.service.ChatStorageService>().addMessage("user", text)
-                        project.service<com.ronin.service.ChatStorageService>().addMessage("assistant", resultTextWithCommand)
+                        appendMessage(MyBundle.message("toolwindow.ronin"), displayedMsg)
+                        
+                        // History Cleanup
+                        messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
+                        storageService.addMessage("assistant", result.text)
+                        
                         val nextCommand = result.commandToRun
-                        if (nextCommand != null) executeCommandChain(nextCommand) else setGenerating(false)
+                        if (nextCommand != null) {
+                            executeCommandChain(nextCommand)
+                        } else if (result.requiresFollowUp) {
+                            val followUpPrompt = "The action was completed. Here is the output:\n```\n${result.toolOutput ?: result.text}\n```\nAnalyze this and continue."
+                            val followUpSummary = "File action complete."
+                            handleFollowUp(followUpPrompt, followUpSummary)
+                        } else {
+                            setGenerating(false)
+                        }
                     }
                 } catch (e: Exception) { setGenerating(false) }
             }
@@ -571,7 +601,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 chatPanel.repaint()
                 messageHistory.clear()
                 project.service<com.ronin.service.ChatStorageService>().clearHistory()
-                project.service<com.ronin.service.AgentSessionService>().clearPlan()
+                project.service<com.ronin.service.AgentSessionService>().clearSession()
             }
         }
 

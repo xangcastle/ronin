@@ -82,21 +82,20 @@ class EditService(private val project: Project) {
 
     fun findFile(path: String): VirtualFile? {
         // Handle standard paths
-        val cleanPath = path.replace("\\", "/").removePrefix("./")
+        val cleanPath = path.replace("\\", "/").removePrefix("./").removePrefix("/")
         
-        // Try absolute first
-        val file = File(cleanPath)
-        if (file.isAbsolute && file.exists()) {
-             return LocalFileSystem.getInstance().findFileByIoFile(file)
-        }
-        
-        // Try relative to project base
+        // 1. Try relative to project base (highest priority for agent-provided paths)
         project.basePath?.let { basePath ->
             val relativeFile = LocalFileSystem.getInstance().findFileByPath("$basePath/$cleanPath")
             if (relativeFile != null) return relativeFile
         }
+
+        // 2. Try absolute path
+        val file = File(path) // Use original path for absolute check
+        if (file.isAbsolute && file.exists()) {
+             return LocalFileSystem.getInstance().findFileByIoFile(file)
+        }
         
-        // Handle case where file doesn't exist yet but path is intended relative
         return null
     }
     

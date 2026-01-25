@@ -6,19 +6,16 @@ import com.intellij.openapi.project.Project
 @Service(Service.Level.PROJECT)
 class AgentSessionService(private val project: Project) {
     
-    // The current active plan text. If null, we are in "Planning Mode".
-    // If not null, we are in "Execution Mode".
-    var currentPlan: String? = null
+    // The history of the current conversation/session.
+    private val history = mutableListOf<Map<String, String>>()
     
-    fun hasPlan(): Boolean {
-        return !currentPlan.isNullOrBlank()
+    fun getHistory(): List<Map<String, String>> = history
+    
+    fun addMessage(role: String, content: String) {
+        history.add(mapOf("role" to role, "content" to content))
     }
     
-    fun updatePlan(newPlan: String) {
-        currentPlan = newPlan
-    }
-    
-    fun clearPlan() {
-        currentPlan = null
+    fun clearSession() {
+        history.clear()
     }
 }

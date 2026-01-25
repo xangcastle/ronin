@@ -14,49 +14,39 @@ class LLMServiceImpl(private val project: Project) : LLMService {
 
     override fun sendMessage(prompt: String, context: String?, history: List<Map<String, String>>, images: List<String>): String {
         val settings = com.ronin.settings.RoninSettingsState.instance
-        val sessionService = project.service<AgentSessionService>()
+        val configService = project.service<RoninConfigService>()
+        val projectContext = configService.getProjectContext()
         
-        val currentPlan = sessionService.currentPlan
-        val isPlanningMode = currentPlan == null
-        
-        val systemPrompt = if (isPlanningMode) {
-             """
-            You are a SENIOR DEVELOPER.
-            Your task is to analyze the user request and create a detailed IMPLEMENTATION PLAN.
+        val systemPrompt = """
+            You are Ronin, an autonomous agentic developer assistant.
+            
+            **ENVIRONMENT:**
+            - You are working in a Bazel-based monorepo.
+            - $projectContext
+            - Allowed Tools: ${settings.allowedTools}
+            
+            **CORE WORKFLOW:**
+            ${settings.coreWorkflow}
             
             **INSTRUCTIONS:**
-            - Return ONLY the plan in PLAIN TEXT.
-            - Break the task into logical steps.
-            - Define clear Acceptance Criteria.
-            - Do not execute code yet. Just plan.
-            
-            User Request: $prompt
-            Context: $context
-            """.trimIndent()
-        } else {
-             """
-            You are an AGENT executing a plan.
-            
-            **CURRENT PLAN:**
-            $currentPlan
-            
-            **INSTRUCTIONS:**
-            - You are in a recursive execution loop. 
-            - Review the history carefully. If you see a 'Command Output', that means the previous step is DONE. 
-            - Move to the NEXT step in the plan. Do NOT repeat finished steps.
-            - Be DECISIVE. Do not explain your thoughts in plain text unless you are asking a 'question'.
-            - Respond in strictly valid JSON matching the schema.
+            - You have MAXIMUM FREEDOM to execute actions.
+            - **STRICT ANTI-REPETITION**: If you see a 'Command Output' for a command, that command is DONE. DO NOT execute it again unless the output explicitly indicates a fixable transient error.
+            - **NO LAZINESS**: Every user message is a NEW instruction. Even if you just completed a task, if the user asks for something else, you MUST act on it immediately. Do NOT repeat previous summaries instead of executing new commands.
+            - **FILE READING**: Use `read_code` to inspect files. You can specify `startLine` (1-based) and `endLine` to read specific ranges. Default is the first 500 lines. Use this for pagination if a file is large.
+            - **FAILURE AWARENESS**: If a command returns an error (e.g., 'fatal', 'error', 'No such file'), do NOT hallucinate success. Acknowledge the failure in your `scratchpad` and try a different approach (e.g., use `ls` to verify paths).
+            - **VERIFICATION**: Use information-gathering tools (`ls`, `pwd`, `git branch`, `cat`) to verify the state of the system before making assumptions.
+            - **TASK COMPLETION**: Only send `task_complete` when the specific objective of the LATEST user request is fully achieved.
+            - Respond in strictly valid JSON matching the schema when you want to execute an action.
             
             **SCHEMA:**
-            {"type": "command|read_code|write_code|question|explanation|task_complete", "content": "reasoning", "command": "...", "path": "...", "code_search": "...", "code_replace": "..."}
+            {"scratchpad": "Your internal reasoning. Analyze previous output here.", "type": "command|read_code|write_code|question|explanation|task_complete", "content": "Direct response to user/status", "command": "...", "path": "...", "startLine": 1, "endLine": 500, "code_search": "...", "code_replace": "..."}
             
             User Request: $prompt
             Context: $context
-            """.trimIndent()
-        }
+        """.trimIndent()
 
         if (settings.provider == "OpenAI") {
-            return sendOpenAIRequest(systemPrompt, history, settings, !isPlanningMode)
+            return sendOpenAIRequest(systemPrompt, history, settings, true)
         }
         return "Error: Only OpenAI supported for v2 Architecture currently."
     }
@@ -123,14 +113,17 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             val commonSchemaProps = mapOf(
                 "type" to "object",
                 "properties" to mapOf(
+                    "scratchpad" to mapOf("type" to "string", "description" to "Internal reasoning and failure analysis."),
                     "type" to mapOf("type" to "string", "enum" to listOf("question", "explanation", "command", "read_code", "write_code", "task_complete")),
-                    "content" to mapOf("type" to "string", "description" to "Primary text content or reasoning."),
+                    "content" to mapOf("type" to "string", "description" to "Primary text content or status."),
                     "command" to mapOf("type" to "string", "description" to "Command to run (if type=command)."),
                     "path" to mapOf("type" to "string", "description" to "File path (if type=read_code|write_code)."),
+                    "startLine" to mapOf("type" to "integer", "description" to "Starting line for read_code (1-based)."),
+                    "endLine" to mapOf("type" to "integer", "description" to "Ending line for read_code."),
                     "code_search" to mapOf("type" to "string", "description" to "Exact code to search for (if type=write_code)."),
                     "code_replace" to mapOf("type" to "string", "description" to "New code (if type=write_code).")
                 ),
-                "required" to listOf("type", "content", "command", "path", "code_search", "code_replace"),
+                "required" to listOf("scratchpad", "type", "content", "command", "path", "startLine", "endLine", "code_search", "code_replace"),
                 "additionalProperties" to false
             )
 

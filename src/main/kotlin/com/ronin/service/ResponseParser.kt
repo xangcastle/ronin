@@ -3,25 +3,19 @@ package com.ronin.service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 
-data class ParseResult(val text: String, val commandToRun: String? = null)
+data class ParseResult(
+    val text: String, 
+    val commandToRun: String? = null, 
+    val scratchpad: String? = null, 
+    val requiresFollowUp: Boolean = false,
+    val toolOutput: String? = null
+)
 
 object ResponseParser {
 
     fun parseAndApply(response: String, project: Project): ParseResult {
         val sessionService = project.service<AgentSessionService>()
-        
-        // PHASE 1: PLANNING
-        // If we don't have a plan yet, the LLM response IS the plan (Plain Text).
-        if (!sessionService.hasPlan()) {
-            val cleanPlan = response.trim()
-            if (cleanPlan.isNotEmpty()) {
-                sessionService.updatePlan(cleanPlan)
-                return ParseResult("**PLAN CAPTURED**\n\n$cleanPlan\n\n*(Type 'Proceed' to start execution)*")
-            }
-        }
-        
-        // PHASE 2: EXECUTION (Step Loop)
-        // If we have a plan, we expect strict JSON "Step".
+        // Direct execution mode: No forced planning/approval step.
         
         // 1. Try to parse JSON Step
         var jsonToParse = response.trim()
@@ -49,14 +43,19 @@ object ResponseParser {
             if (step != null && (step.containsKey("type") || step.containsKey("command"))) {
                 val type = step["type"] as? String
                 val content = step["content"] as? String ?: ""
+                val scratchpad = step["scratchpad"] as? String ?: ""
+                
+                if (scratchpad.isNotEmpty()) {
+                    println("Ronin Thinking: $scratchpad")
+                }
                 
                 return when (type) {
                     "question", "explanation" -> {
-                        ParseResult(content)
+                        ParseResult(content, scratchpad = scratchpad)
                     }
                     "task_complete" -> {
-                        sessionService.clearPlan()
-                        ParseResult("✅ **TASK COMPLETED**\n\n$content")
+                        sessionService.clearSession()
+                        ParseResult("✅ **TASK COMPLETED**\n\n$content", scratchpad = scratchpad)
                     }
                     "command" -> {
                          // Extract command
@@ -67,30 +66,39 @@ object ResponseParser {
                          } else {
                              rawCmd?.toString()
                          }
-                         ParseResult(content, commandStr)
+                         ParseResult(content, commandStr, scratchpad = scratchpad)
                     }
                     "read_code" -> {
                         val path = step["path"] as? String
+                        val startLine = (step["startLine"] as? Number)?.toInt() ?: 1
+                        val endLine = (step["endLine"] as? Number)?.toInt() ?: -1
+                        
                         if (path != null) {
-                            // TODO: Implement ReadFile logic here or use a service
-                            // For now, let's look for a simple read implementation or defer to user?
-                            // User workflow expects us to read it.
+                            val editService = project.service<EditService>()
                             try {
-                                val vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(path)
+                                val vFile = editService.findFile(path)
                                 if (vFile != null) {
-                                    val fileContent = String(vFile.contentsToByteArray())
-                                    val truncated = fileContent.take(2000) + (if(fileContent.length > 2000) "\n...(truncated)" else "")
-                                    ParseResult("$content\n\n**Reading File:** `$path`\n```\n$truncated\n```")
-                                    // Note: This result is displayed to the user. 
-                                    // The ChatToolWindowFactory needs to ensure this "output" is fed back to the LLM for the NEXT turn.
+                                    val lines = String(vFile.contentsToByteArray()).lines()
+                                    val startIdx = (startLine - 1).coerceAtLeast(0).coerceAtMost(lines.size)
+                                    val endIdx = if (endLine == -1) (startIdx + 500).coerceAtMost(lines.size) else endLine.coerceAtMost(lines.size)
+                                    
+                                    val selectedLines = lines.subList(startIdx, endIdx)
+                                    val fileContent = selectedLines.joinToString("\n")
+                                    val isTruncated = endIdx < lines.size || startIdx > 0
+                                    
+                                    val output = "**Reading File:** `$path` (Lines $startLine-$endIdx of ${lines.size})\n" +
+                                               "```\n$fileContent\n```" +
+                                               (if (isTruncated) "\n...(truncated)" else "")
+                                    
+                                    ParseResult(content, scratchpad = scratchpad, requiresFollowUp = true, toolOutput = output)
                                 } else {
-                                    ParseResult("Error: File not found at $path")
+                                    ParseResult("Error: File not found at $path (Tried relative and absolute resolution)", scratchpad = scratchpad, requiresFollowUp = true)
                                 }
                             } catch(e: Exception) {
-                                ParseResult("Error reading file: ${e.message}")
+                                ParseResult("Error reading file: ${e.message}", scratchpad = scratchpad, requiresFollowUp = true)
                             }
                         } else {
-                            ParseResult("Error: No path provided for read_code")
+                            ParseResult("Error: No path provided for read_code", scratchpad = scratchpad)
                         }
                     }
                     "write_code" -> {
@@ -109,9 +117,10 @@ object ResponseParser {
                                 val results = editService.applyEdits(listOf(EditService.EditOperation(path, search, replace)))
                                 if (results.isNotEmpty()) "Applied 1 edit." else "Failed to apply edit (search string not found)."
                             }
-                            ParseResult("$content\n\n**Edit Applied:** $result")
+                            val output = "**Edit Applied to `$path`**: $result"
+                            ParseResult(content, scratchpad = scratchpad, requiresFollowUp = true, toolOutput = output)
                         } else {
-                            ParseResult("Error: Missing path, search, or replace for write_code")
+                            ParseResult("Error: Missing path, search, or replace for write_code", scratchpad = scratchpad, requiresFollowUp = true)
                         }
                     }
                     else -> ParseResult(response) // Unknown type fallback
