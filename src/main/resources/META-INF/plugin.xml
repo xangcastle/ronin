@@ -1,6 +1,6 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.xangcastle.ronin</id>
+    <id>com.ronin.plugin</id>
     <name>Ronin</name>
     <vendor>Ronin</vendor>
 
