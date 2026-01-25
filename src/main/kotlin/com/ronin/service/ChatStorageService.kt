@@ -4,9 +4,6 @@ import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
-import com.intellij.openapi.project.Project
-
-import com.intellij.util.xmlb.annotations.OptionTag
 import com.intellij.util.xmlb.annotations.XCollection
 import java.io.Serializable
 
@@ -19,7 +16,8 @@ class ChatStorageService : PersistentStateComponent<ChatStorageService.State> {
 
     data class ChatMessage(
         var role: String = "",
-        var content: String = ""
+        var content: String = "",
+        var timestamp: Long = System.currentTimeMillis()
     ) : Serializable
 
     class State {

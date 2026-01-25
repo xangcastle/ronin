@@ -17,6 +17,9 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         val configService = project.service<RoninConfigService>()
         val projectContext = configService.getProjectContext()
         
+        val contextService = project.service<ContextService>()
+        val projectRules = contextService.getProjectRules()
+        
         val systemPrompt = """
             You are Ronin, an autonomous agentic developer assistant.
             
@@ -24,6 +27,8 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             - You are working in a Bazel-based monorepo.
             - $projectContext
             - Allowed Tools: ${settings.allowedTools}
+            
+            ${if (!projectRules.isNullOrBlank()) "**PROJECT RULES:**\n$projectRules\n" else ""}
             
             **CORE WORKFLOW:**
             ${settings.coreWorkflow}
@@ -58,7 +63,11 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         if (apiKey.isNullOrBlank()) return "Error: OpenAI API Key not found."
 
         val model = settings.model.ifBlank { "gpt-4o" }
-        val jsonBody = createOpenAIRequestBody(model, systemPrompt, history, enforceJson)
+        
+        // Prune history to manage token limits (approx heuristic)
+        val prunedHistory = pruneHistory(history, 20)
+        
+        val jsonBody = createOpenAIRequestBody(model, systemPrompt, prunedHistory, enforceJson)
 
         // Custom endpoint handling for specific internal/preview models
         val endpoint = if (model.contains("codex") || model.contains("gpt-5.1")) {
@@ -85,6 +94,14 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         } catch (e: Exception) {
             return "Error sending request: ${e.message}"
         }
+    }
+
+    private fun pruneHistory(history: List<Map<String, String>>, maxMessages: Int): List<Map<String, String>> {
+        if (history.size <= maxMessages) return history
+        
+        // Always keep the first message if it's user (intent) - debatable, but simple sliding window is often safer for cohesiveness
+        // Strategy: Keep last N messages.
+        return history.takeLast(maxMessages)
     }
 
     internal fun createOpenAIRequestBody(model: String, systemPrompt: String, history: List<Map<String, String>>, enforceJson: Boolean): String {

@@ -15,6 +15,14 @@ class ContextService(private val project: Project) {
         return editor.document.text
     }
 
+    fun getProjectRules(): String? {
+        val basePath = project.basePath ?: return null
+        val roninRules = java.io.File("$basePath/.roninrules")
+        if (roninRules.exists()) return roninRules.readText()
+        
+        return null
+    }
+
     private fun parseRoninConfig(): com.ronin.model.RoninMonorepo? {
         val basePath = project.basePath ?: return null
         val configFile = java.io.File("$basePath/ronin.yaml")

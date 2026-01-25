@@ -184,8 +184,8 @@ class ChatToolWindowFactory : ToolWindowFactory {
             }
             
             // Load History
-            val storageService = project.service<com.ronin.service.ChatStorageService>()
-            val savedHistory = storageService.getHistory()
+            val sessionService = project.service<com.ronin.service.AgentSessionService>()
+            val savedHistory = sessionService.getHistory()
             if (savedHistory.isNotEmpty()) {
                 messageHistory.addAll(savedHistory)
                 for (msg in savedHistory) {
@@ -312,11 +312,11 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     if (Thread.interrupted()) throw InterruptedException()
                     val llmService = project.service<LLMService>()
                     
-                    val storageService = project.service<com.ronin.service.ChatStorageService>()
+                    val sessionService = project.service<com.ronin.service.AgentSessionService>()
                     
                     // Add to history BEFORE sending to LLM
                     messageHistory.add(mapOf("role" to "user", "content" to text))
-                    storageService.addMessage("user", text)
+                    sessionService.addMessage("user", text)
                     
                     val projectStructure = ReadAction.compute<String, Throwable> { 
                         contextService.getProjectStructure() 
@@ -343,7 +343,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     
                     // History Cleanup: Save ONLY the agent text, not the potentially huge tool output
                     messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
-                    storageService.addMessage("assistant", result.text)
+                    sessionService.addMessage("assistant", result.text)
                     
                     val command = result.commandToRun
                     if (command != null) {
@@ -540,10 +540,10 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
                     if (Thread.interrupted()) throw InterruptedException()
                     
-                    val storageService = project.service<com.ronin.service.ChatStorageService>()
+                    val sessionService = project.service<com.ronin.service.AgentSessionService>()
                     // Add to history BEFORE LLM call for handleFollowUp too
                     messageHistory.add(mapOf("role" to "user", "content" to text))
-                    storageService.addMessage("user", text)
+                    sessionService.addMessage("user", text)
                     
                     val result = com.ronin.service.ResponseParser.parseAndApply(response, project)
                     
@@ -558,7 +558,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
                         
                         // History Cleanup
                         messageHistory.add(mapOf("role" to "assistant", "content" to result.text))
-                        storageService.addMessage("assistant", result.text)
+                        sessionService.addMessage("assistant", result.text)
                         
                         val nextCommand = result.commandToRun
                         if (nextCommand != null) {
@@ -600,7 +600,6 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 chatPanel.revalidate()
                 chatPanel.repaint()
                 messageHistory.clear()
-                project.service<com.ronin.service.ChatStorageService>().clearHistory()
                 project.service<com.ronin.service.AgentSessionService>().clearSession()
             }
         }
