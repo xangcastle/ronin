@@ -10,6 +10,7 @@
         <toolWindow factoryClass="com.ronin.ui.ChatToolWindowFactory" id="Ronin Chat" anchor="right" icon="AllIcons.Toolwindows.ToolWindowMessages"/>
         <applicationConfigurable parentId="tools" instance="com.ronin.settings.RoninSettingsConfigurable" id="com.ronin.settings.RoninSettingsConfigurable" displayName="Ronin"/>
         <applicationService serviceImplementation="com.ronin.settings.RoninSettingsState"/>
+        <projectService serviceImplementation="com.ronin.service.AgentSessionService"/>
         <projectService serviceInterface="com.ronin.service.LLMService" serviceImplementation="com.ronin.service.LLMServiceImpl"/>
     </extensions>
 

@@ -5,7 +5,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 class LLMServiceJsonTest : BasePlatformTestCase() {
 
     fun testJsonEscapingParams() {
-        val service = LLMServiceImpl()
+        val service = LLMServiceImpl(getProject())
         val prompt = """
             Path: C:\Windows\System32
             Tab: 	Indent
@@ -13,7 +13,7 @@ class LLMServiceJsonTest : BasePlatformTestCase() {
             Line
         """.trimIndent()
         
-        val json = service.createOpenAIRequestBody("gpt-4o", prompt, emptyList())
+        val json = service.createOpenAIRequestBody("gpt-4o", prompt, emptyList(), false)
         
         // The backslash in C:\Windows must be escaped to C:\\Windows in JSON
         // Current implementation likely fails this check

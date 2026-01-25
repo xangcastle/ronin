@@ -7,7 +7,7 @@ import com.google.gson.Gson
 class LLMServiceFetchModelsTest : BasePlatformTestCase() {
 
     fun testFetchModelsFiltering() {
-        val service = LLMServiceImpl()
+        val service = LLMServiceImpl(getProject())
         
         // Mock response data
         val mockResponse = mapOf(

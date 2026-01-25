@@ -588,7 +588,9 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 chatPanel.revalidate()
                 chatPanel.repaint()
                 messageHistory.clear()
+                messageHistory.clear()
                 project.service<com.ronin.service.ChatStorageService>().clearHistory()
+                project.service<com.ronin.service.AgentSessionService>().clearPlan()
             }
         }
 

@@ -1,7 +1,7 @@
 package com.ronin.service
 
-
-
+import com.intellij.openapi.components.service
+import com.intellij.openapi.project.Project
 
 interface LLMService {
     fun sendMessage(prompt: String, context: String? = null, history: List<Map<String, String>> = emptyList(), images: List<String> = emptyList()): String
@@ -9,97 +9,79 @@ interface LLMService {
     fun fetchAvailableModels(provider: String): List<String>
 }
 
-class LLMServiceImpl : LLMService {
+class LLMServiceImpl(private val project: Project) : LLMService {
     private val client = java.net.http.HttpClient.newHttpClient()
 
     override fun sendMessage(prompt: String, context: String?, history: List<Map<String, String>>, images: List<String>): String {
         val settings = com.ronin.settings.RoninSettingsState.instance
+        val sessionService = project.service<AgentSessionService>()
         
-        // Context is only added to the LATEST prompt if provided, or maybe as a system message?
-        // Let's add it to the latest user message for now.
-        val fullPrompt = if (context != null) {
-            val allowedTools = settings.allowedTools.ifBlank { "git, docker, kubectl, argocd, aws, bazel" }
-            val coreWorkflow = settings.coreWorkflow.ifBlank {
-                """
-                1. **PLAN**: Analyze request.
-                2. **EXECUTE**: Return the JSON with commands and edits.
-                3. **VERIFY**: Check if the goal is achieved. Only run verification commands (test/build) if necessary to validate code changes. Do NOT verify simple info queries (e.g. pwd, ls).
-                """.trimIndent()
-            }
+        val currentPlan = sessionService.currentPlan
+        val isPlanningMode = currentPlan == null
+        
+        val systemPrompt = if (isPlanningMode) {
+             """
+            You are a SENIOR DEVELOPER.
+            Your task is to analyze the user request and create a detailed IMPLEMENTATION PLAN.
             
-            """
-            System Instructions:
-            You are the SENIOR DEVELOPER assigned to this task.
-            Your goal is to solve the user's request COMPLETELY and AUTONOMOUSLY.
-            
-            **ENVIRONMENT & PERMISSIONS:**
-            - You are running **LOCALLY** on the user's machine.
-            - You have **FULL TERMINAL ACCESS**.
-            - You CAN and SHOULD execute ANY installed CLI tool (e.g., $allowedTools).
-            - **NEVER** refuse to run a command claiming you "don't have access" or "can't connect to the cluster". 
-            - If the user asks you to check something, **RUN THE COMMAND**.
-
-            **OUTPUT FORMAT:**
-            You must respond with a JSON object strictly matching the schema:
-            {
-              "explanation": "Summary of what you are doing",
-              "commands": ["ls -la", "./gradlew test"],
-              "edits": [
-                {
-                  "path": "/abs/path/to/file",
-                  "search": "code block to find",
-                  "replace": "replacement code block"
-                }
-              ]
-            }
-
-            **EDITING RULES (Surgical Edits):**
-            - To EDIT a file, provide the `search` block (exact match) and the `replace` block.
-            - The `search` block must be unique in the file.
-            - To CREATE or OVERWRITE a file entirely, keep `search` null or empty.
-            - Do NOT re-write the whole file if you only need to change one function.
-            
-            **CORE WORKFLOW:**
-            $coreWorkflow
-            
-            Context:
-            $context
+            **INSTRUCTIONS:**
+            - Return ONLY the plan in PLAIN TEXT.
+            - Break the task into logical steps.
+            - Define clear Acceptance Criteria.
+            - Do not execute code yet. Just plan.
             
             User Request: $prompt
+            Context: $context
             """.trimIndent()
         } else {
-            prompt
+             """
+            You are an AGENT executing a plan.
+            
+            **CURRENT PLAN:**
+            $currentPlan
+            
+            **INSTRUCTIONS:**
+            - Review the history and the plan.
+            - meticulousy determine the NEXT logical step.
+            - Respond in strictly valid JSON matching the schema.
+            - Allowed Types:
+              - "question": Ask the user for clarification.
+              - "explanation": Explain something to the user.
+              - "command": Execute a terminal command.
+              - "read_code": Read a file's content.
+              - "write_code": Modify a file.
+              - "task_complete": When the goal is fully achieved.
+            
+            User Request: $prompt
+            Context: $context
+            """.trimIndent()
         }
-        
-        // ...
 
         if (settings.provider == "OpenAI") {
-            return sendOpenAIRequest(fullPrompt, history, settings)
+            return sendOpenAIRequest(systemPrompt, history, settings, !isPlanningMode)
         }
-        
-        // ... (mock implementation omitted for brevity, assume similar)
-         val apiKeyName = when(settings.provider) {
-            "Anthropic" -> "anthropicApiKey"
-            else -> "openaiApiKey"
-        }
-        val apiKey = com.ronin.settings.CredentialHelper.getApiKey(apiKeyName)
-        val hasKey = if (!apiKey.isNullOrBlank()) "Yes" else "No"
-        return "Rank: Mock Response ($hasKey)"
+        return "Error: Only OpenAI supported for v2 Architecture currently."
     }
 
-    private fun sendOpenAIRequest(currentPrompt: String, history: List<Map<String, String>>, settings: com.ronin.settings.RoninSettingsState): String {
+    private fun sendOpenAIRequest(systemPrompt: String, history: List<Map<String, String>>, settings: com.ronin.settings.RoninSettingsState, enforceJson: Boolean): String {
         val apiKey = com.ronin.settings.CredentialHelper.getApiKey("openaiApiKey")
-        if (apiKey.isNullOrBlank()) {
-            return "Error: OpenAI API Key not found. Please configure it in Settings."
-        }
+            ?: System.getenv("OPENAI_API_KEY")
+        
+        if (apiKey.isNullOrBlank()) return "Error: OpenAI API Key not found."
 
         val model = settings.model.ifBlank { "gpt-4o" }
-        
-        val jsonBody = createOpenAIRequestBody(model, currentPrompt, history)
+        val jsonBody = createOpenAIRequestBody(model, systemPrompt, history, enforceJson)
+
+        // Custom endpoint handling for specific internal/preview models
+        val endpoint = if (model.contains("codex") || model.contains("gpt-5.1")) {
+            "https://api.openai.com/v1/responses"
+        } else {
+            "https://api.openai.com/v1/chat/completions"
+        }
 
         val request = java.net.http.HttpRequest.newBuilder()
-            .timeout(java.time.Duration.ofSeconds(300)) // Increased timeout for reasoning models
-            .uri(java.net.URI.create("https://api.openai.com/v1/chat/completions"))
+            .timeout(java.time.Duration.ofSeconds(300))
+            .uri(java.net.URI.create(endpoint))
             .header("Content-Type", "application/json")
             .header("Authorization", "Bearer $apiKey")
             .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
@@ -107,78 +89,81 @@ class LLMServiceImpl : LLMService {
 
         try {
             val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-            val responseBody = response.body()
-            
             if (response.statusCode() == 200) {
-                return extractContentFromResponse(responseBody)
+                return extractContentFromResponse(response.body())
             } else {
-                return "Error: Received status code ${response.statusCode()}\nResponse: $responseBody"
+                return "Error: ${response.statusCode()} - ${response.body()}"
             }
         } catch (e: Exception) {
             return "Error sending request: ${e.message}"
         }
     }
 
-    internal fun createOpenAIRequestBody(model: String, currentPrompt: String, history: List<Map<String, String>>): String {
-        val messages = history.map { 
-            mapOf("role" to (it["role"] ?: "user"), "content" to (it["content"] ?: ""))
-        }.toMutableList()
+    internal fun createOpenAIRequestBody(model: String, systemPrompt: String, history: List<Map<String, String>>, enforceJson: Boolean): String {
+        val messages = mutableListOf<Map<String, String>>()
+        messages.add(mapOf("role" to "system", "content" to systemPrompt))
         
-        messages.add(mapOf("role" to "user", "content" to currentPrompt))
+        // Add only relevant history (maybe filtered? for now all)
+        messages.addAll(history.map { 
+             mapOf("role" to (it["role"] ?: "user"), "content" to (it["content"] ?: ""))
+        })
         
-        val isReasoningModel = model.startsWith("o1") || model.contains("gpt-5")
+        val isReasoningModel = model.startsWith("o1") || model.startsWith("gpt-5") || model.contains("reasoning")
+        val isResponsesApi = model.contains("codex") || model.contains("gpt-5.1")
         
         val requestBody = mutableMapOf<String, Any>(
-            "model" to model,
-            "messages" to messages,
-            "response_format" to mapOf(
-                "type" to "json_schema",
-                "json_schema" to mapOf(
-                    "name" to "RoninResponse",
-                    "strict" to true,
-                    "schema" to mapOf(
-                        "type" to "object",
-                        "properties" to mapOf(
-                            "explanation" to mapOf(
-                                "type" to "string",
-                                "description" to "Concise summary of changes and reasoning."
-                            ),
-                            "commands" to mapOf(
-                                "type" to "array",
-                                "items" to mapOf("type" to "string"),
-                                "description" to "Terminal commands to run (e.g. tests)."
-                            ),
-                            "edits" to mapOf(
-                                "type" to "array",
-                                "items" to mapOf(
-                                    "type" to "object",
-                                    "properties" to mapOf(
-                                        "path" to mapOf("type" to "string"),
-                                        "search" to mapOf(
-                                            "type" to "string",
-                                            "description" to "Exact code block to replace. Null/empty for new files/overwrite."
-                                        ),
-                                        "replace" to mapOf(
-                                            "type" to "string",
-                                            "description" to "New code block."
-                                        )
-                                    ),
-                                    "required" to listOf("path", "replace", "search"),
-                                    "additionalProperties" to false
-                                )
-                            )
-                        ),
-                        "required" to listOf("explanation", "commands", "edits"),
-                        "additionalProperties" to false
-                    )
-                )
-            )
+            "model" to model
         )
         
-        if (isReasoningModel) {
-            requestBody["temperature"] = 1
+        if (isResponsesApi) {
+            requestBody["input"] = messages
         } else {
-            requestBody["temperature"] = 0.1
+            requestBody["messages"] = messages
+        }
+        
+        if (enforceJson) {
+            val commonSchemaProps = mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "type" to mapOf("type" to "string", "enum" to listOf("question", "explanation", "command", "read_code", "write_code", "task_complete")),
+                    "content" to mapOf("type" to "string", "description" to "Primary text content or reasoning."),
+                    "command" to mapOf("type" to "string", "description" to "Command to run (if type=command)."),
+                    "path" to mapOf("type" to "string", "description" to "File path (if type=read_code|write_code)."),
+                    "code_search" to mapOf("type" to "string", "description" to "Exact code to search for (if type=write_code)."),
+                    "code_replace" to mapOf("type" to "string", "description" to "New code (if type=write_code).")
+                ),
+                "required" to listOf("type", "content", "command", "path", "code_search", "code_replace"),
+                "additionalProperties" to false
+            )
+
+            if (isResponsesApi) {
+                 // Flattened structure for Responses API
+                 // format: { type: "json_schema", name: "...", strict: true, schema: ... }
+                 val flattenedSchema = mapOf(
+                    "type" to "json_schema",
+                    "name" to "RoninStep",
+                    "strict" to true,
+                    "schema" to commonSchemaProps
+                 )
+                 
+                 requestBody["text"] = mapOf("format" to flattenedSchema)
+                 requestBody["temperature"] = 1.0 
+            } else {
+                 // Standard Chat Completions API
+                 val jsonSchemaWrapper = mapOf(
+                    "type" to "json_schema",
+                    "json_schema" to mapOf(
+                        "name" to "RoninStep",
+                        "strict" to true,
+                        "schema" to commonSchemaProps
+                    )
+                 )
+                 requestBody["response_format"] = jsonSchemaWrapper
+                 requestBody["temperature"] = if (isReasoningModel) 1.0 else 0.1
+            }
+        } else {
+             // Planning Phase
+             requestBody["temperature"] = if (isReasoningModel) 1.0 else 0.7
         }
         
         return com.google.gson.Gson().toJson(requestBody)
