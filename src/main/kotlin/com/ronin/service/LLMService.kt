@@ -75,51 +75,8 @@ class LLMServiceImpl : LLMService {
         }
 
         val model = settings.model.ifBlank { "gpt-4o" }
-        val isO1 = model.startsWith("o1")
         
-        val messagesBuilder = StringBuilder()
-        
-        // Add history
-        for (msg in history) {
-            val role = msg["role"] ?: "user"
-            val content = msg["content"] ?: ""
-            val escapedContent = content.replace("\"", "\\\"").replace("\n", "\\n")
-            messagesBuilder.append("""{"role": "$role", "content": "$escapedContent"},""")
-        }
-        
-        // Add current message
-        val escapedCurrent = currentPrompt.replace("\"", "\\\"").replace("\n", "\\n")
-        messagesBuilder.append("""{"role": "user", "content": "$escapedCurrent"}""")
-        
-        // O1-specific parameters logic
-        // User requested NO LIMITS.
-        // We omit max_tokens / max_completion_tokens entirely to let the model use its full capacity.
-        
-        // Temperature validation: O1 models require temperature 1 (or default).
-        // Non-O1 models can use lower temperature for coding precision.
-        val isReasoningModel = model.startsWith("o1") || model.contains("gpt-5") // Heuristic for future models
-        
-        val jsonBody = if (isReasoningModel) {
-             """
-            {
-                "model": "$model",
-                "temperature": 1,
-                "messages": [
-                    $messagesBuilder
-                ]
-            }
-            """.trimIndent()
-        } else {
-             """
-            {
-                "model": "$model",
-                "temperature": 0.1,
-                "messages": [
-                    $messagesBuilder
-                ]
-            }
-            """.trimIndent()
-        }
+        val jsonBody = createOpenAIRequestBody(model, currentPrompt, history)
 
         val request = java.net.http.HttpRequest.newBuilder()
             .timeout(java.time.Duration.ofSeconds(300)) // Increased timeout for reasoning models
@@ -141,6 +98,29 @@ class LLMServiceImpl : LLMService {
         } catch (e: Exception) {
             return "Error sending request: ${e.message}"
         }
+    }
+
+    internal fun createOpenAIRequestBody(model: String, currentPrompt: String, history: List<Map<String, String>>): String {
+        val messages = history.map { 
+            mapOf("role" to (it["role"] ?: "user"), "content" to (it["content"] ?: ""))
+        }.toMutableList()
+        
+        messages.add(mapOf("role" to "user", "content" to currentPrompt))
+        
+        val isReasoningModel = model.startsWith("o1") || model.contains("gpt-5")
+        
+        val requestBody = mutableMapOf<String, Any>(
+            "model" to model,
+            "messages" to messages
+        )
+        
+        if (isReasoningModel) {
+            requestBody["temperature"] = 1
+        } else {
+            requestBody["temperature"] = 0.1
+        }
+        
+        return com.google.gson.Gson().toJson(requestBody)
     }
 
     private fun extractContentFromResponse(json: String): String {
@@ -190,6 +170,53 @@ class LLMServiceImpl : LLMService {
         }
     }
     
+    internal fun parseModelsJson(json: String): List<String> {
+        return try {
+            val tempMap = com.google.gson.Gson().fromJson(json, Map::class.java) as Map<String, Any>
+            val data = tempMap["data"] as? List<Map<String, Any>> ?: emptyList()
+            
+            val models = mutableListOf<String>()
+            
+            for (modelObj in data) {
+                val id = modelObj["id"] as? String ?: continue
+                
+                val capabilities = (modelObj["capabilities"] as? Map<String, Any>) 
+                    ?: (modelObj["features"] as? List<String>)?.associate { it to true } 
+                    ?: emptyMap()
+                    
+                val isChatExplicit = capabilities.keys.any { k -> k.toString().contains("chat") }
+                val isCompletionOnly = capabilities.keys.any { k -> (k.toString() == "completion" || k.toString().contains("text-completion")) } && !isChatExplicit
+                
+                val isGpt = id.startsWith("gpt") || id.startsWith("o1") || id.startsWith("chatgpt")
+                val isInstruct = id.contains("instruct")
+                val isAudio = id.contains("audio") || id.contains("realtime") || id.contains("tts") || id.contains("whisper")
+                val isDallE = id.contains("dall-e")
+                // Explicitly exclude known completion-only models that heuristics might miss
+                val isKnownCompletion = id.contains("gpt-5.2-pro") || id.contains("davinci") || id.contains("babbage")
+                
+                var shouldInclude = false
+                
+                if (isChatExplicit) {
+                     shouldInclude = true
+                } else if (isCompletionOnly) {
+                     shouldInclude = false
+                } else {
+                    if (isGpt && !isInstruct && !isAudio && !isDallE && !isKnownCompletion) {
+                        shouldInclude = true
+                    }
+                }
+                
+                if (shouldInclude) {
+                    models.add(id)
+                }
+            }
+            models.sorted().reversed()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
     override fun fetchAvailableModels(provider: String): List<String> {
         if (provider != "OpenAI") return getAvailableModels(provider)
 
@@ -206,18 +233,7 @@ class LLMServiceImpl : LLMService {
         try {
             val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
             if (response.statusCode() == 200) {
-                // Parse JSON manually to find "id"
-                val json = response.body()
-                val models = mutableListOf<String>()
-                val pattern = "\"id\"\\s*:\\s*\"([^\"]+)\"".toRegex()
-                pattern.findAll(json).forEach { match ->
-                    val id = match.groupValues[1]
-                    // Filter for chat models to avoid clutter and incompatible models
-                    if ((id.startsWith("gpt") || id.startsWith("o1")) && !id.contains("instruct") && !id.contains("audio") && !id.contains("realtime")) {
-                        models.add(id)
-                    }
-                }
-                return models.sorted().reversed()
+                return parseModelsJson(response.body())
             }
         } catch (e: Exception) {
             e.printStackTrace()
