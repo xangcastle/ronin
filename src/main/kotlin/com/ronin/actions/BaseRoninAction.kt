@@ -37,11 +37,11 @@ abstract class BaseRoninAction : AnAction() {
             // 3. Call Service
             com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
                 val llmService = project.service<LLMService>()
-                val contextService = project.service<com.ronin.service.ContextService>()
+                val configService = project.service<com.ronin.service.RoninConfigService>()
 
                 // Gather Context
-                val activeFile = contextService.getActiveFileContent()
-                val projectStructure = contextService.getProjectStructure()
+                val activeFile = configService.getActiveFileContent()
+                val projectStructure = configService.getProjectStructure()
 
                 val contextBuilder = StringBuilder()
                 if (activeFile != null) {

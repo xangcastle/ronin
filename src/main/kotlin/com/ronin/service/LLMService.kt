@@ -15,12 +15,9 @@ class LLMServiceImpl(private val project: Project) : LLMService {
     override fun sendMessage(prompt: String, context: String?, history: List<Map<String, String>>, images: List<String>): String {
         val settings = com.ronin.settings.RoninSettingsState.instance
         val configService = project.service<RoninConfigService>()
-        val projectContext = configService.getProjectContext()
-        
-        val contextService = project.service<ContextService>()
-        val projectRules = contextService.getProjectRules()
-        
-        val systemPrompt = """
+        val projectContext = configService.getProjectStructure()
+        val projectRules = configService.getProjectRules()
+                val systemPrompt = """
             You are Ronin, an autonomous agentic developer assistant.
             
             **ENVIRONMENT:**
@@ -30,28 +27,81 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             
             ${if (!projectRules.isNullOrBlank()) "**PROJECT RULES:**\n$projectRules\n" else ""}
             
-            **CORE WORKFLOW:**
-            ${settings.coreWorkflow}
+            **CORE PROTOCOL (Thought-Action):**
+            You must always "think" before you act. Your response must follow this strict XML format:
             
+            <analysis>
+            1. Analyze the user request and file context.
+            2. Plan your specific edits or actions.
+            3. Verify your plan against project rules.
+            </analysis>
+            
+            <execute>
+                <!-- YOU MUST PROVIDE EXACTLY ONE COMMAND HERE. DO NOT LEAVE EMPTY. -->
+                <command name="COMMAND_NAME">
+                    <arg name="ARG_NAME">ARG_VALUE</arg>
+                </command>
+            </execute>
+            
+            **CRITICAL:** 
+            - IF YOU ARE JUST REPLYING TO THE USER (NO CODE ACTION), USE `task_complete` WITH YOUR MESSAGE AS `content`.
+            - DO NOT OUTPUT ONLY ANALYSIS. AUTOMATION WILL FAIL.
+            
+            **AVAILABLE COMMANDS:**
+            
+            1. `read_code`: Inspect files.
+               <command name="read_code">
+                   <arg name="path">libs/core/utils.py</arg>
+                   <arg name="start_line">1</arg> <!-- Optional, default 1 -->
+                   <arg name="end_line">100</arg> <!-- Optional, default 500 lines -->
+               </command>
+            
+            2. `write_code`: Modify files. Use CDATA for content to avoid escaping issues.
+               <command name="write_code">
+                   <arg name="path">libs/core/utils.py</arg>
+                   <!-- OPTION A: Line-Based Replacement (Preferred) -->
+                   <arg name="start_line">10</arg>
+                   <arg name="end_line">15</arg>
+                   <content><![CDATA[
+            def new_function():
+                return True
+            ]]></content>
+               </command>
+               
+               OR
+               
+               <command name="write_code">
+                   <arg name="path">...</arg>
+                   <!-- OPTION B: Search & Replace (Fuzzy) -->
+                   <arg name="code_search"><![CDATA[def old_function():]]></arg>
+                   <content><![CDATA[def new_function():]]></content>
+               </command>
+
+            3. `run_command`: Execute shell commands.
+               <command name="run_command">
+                   <arg name="command">./gradlew build</arg>
+               </command>
+
+            4. `task_complete`: Signal completion.
+               <command name="task_complete">
+                   <arg name="content">I have finished the task.</arg>
+               </command>
+
             **INSTRUCTIONS:**
-            - You have MAXIMUM FREEDOM to execute actions.
-            - **STRICT ANTI-REPETITION**: If you see a 'Command Output' for a command, that command is DONE. DO NOT execute it again unless the output explicitly indicates a fixable transient error.
-            - **NO LAZINESS**: Every user message is a NEW instruction. Even if you just completed a task, if the user asks for something else, you MUST act on it immediately. Do NOT repeat previous summaries instead of executing new commands.
-            - **FILE READING**: Use `read_code` to inspect files. You can specify `startLine` (1-based) and `endLine` to read specific ranges. Default is the first 500 lines. Use this for pagination if a file is large.
-            - **FAILURE AWARENESS**: If a command returns an error (e.g., 'fatal', 'error', 'No such file'), do NOT hallucinate success. Acknowledge the failure in your `scratchpad` and try a different approach (e.g., use `ls` to verify paths).
-            - **VERIFICATION**: Use information-gathering tools (`ls`, `pwd`, `git branch`, `cat`) to verify the state of the system before making assumptions.
-            - **TASK COMPLETION**: Only send `task_complete` when the specific objective of the LATEST user request is fully achieved.
-            - Respond in strictly valid JSON matching the schema when you want to execute an action.
-            
-            **SCHEMA:**
-            {"scratchpad": "Your internal reasoning. Analyze previous output here.", "type": "command|read_code|write_code|question|explanation|task_complete", "content": "Direct response to user/status", "command": "...", "path": "...", "startLine": 1, "endLine": 500, "code_search": "...", "code_replace": "..."}
+            - **MODE: VIBE CODING (Architect/Editor)**:
+                - **Self-Healing**: If you make a mistake, analyze it in <analysis> and fix it in the next turn.
+                - **Context Echo**: After editing, the tool returns the result. READ IT.
+            - **SAFE EDITING**: 
+                - Use `write_code` with `start_line`/`end_line` whenever possible.
+            - **STRICT ANTI-REPETITION**: If a command fails, do not retry blindly. Read the file, understand the state, then fix.
             
             User Request: $prompt
             Context: $context
         """.trimIndent()
 
         if (settings.provider == "OpenAI") {
-            return sendOpenAIRequest(systemPrompt, history, settings, true)
+            // enforceJson = false for v3 Protocol (XML)
+            return sendOpenAIRequest(systemPrompt, history, settings, false)
         }
         return "Error: Only OpenAI supported for v2 Architecture currently."
     }
@@ -98,9 +148,6 @@ class LLMServiceImpl(private val project: Project) : LLMService {
 
     private fun pruneHistory(history: List<Map<String, String>>, maxMessages: Int): List<Map<String, String>> {
         if (history.size <= maxMessages) return history
-        
-        // Always keep the first message if it's user (intent) - debatable, but simple sliding window is often safer for cohesiveness
-        // Strategy: Keep last N messages.
         return history.takeLast(maxMessages)
     }
 
@@ -113,7 +160,6 @@ class LLMServiceImpl(private val project: Project) : LLMService {
              mapOf("role" to (it["role"] ?: "user"), "content" to (it["content"] ?: ""))
         })
         
-        val isReasoningModel = model.startsWith("o1") || model.startsWith("gpt-5") || model.contains("reasoning")
         val isResponsesApi = model.contains("codex") || model.contains("gpt-5.1")
         
         val requestBody = mutableMapOf<String, Any>(
@@ -122,57 +168,14 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         
         if (isResponsesApi) {
             requestBody["input"] = messages
+            // For v3 XML protocol, we effectively disable strict schema and rely on prompt
+            requestBody["temperature"] = 0.2 // Low temp for code/XML
         } else {
             requestBody["messages"] = messages
+            requestBody["temperature"] = 0.1 // Low temp for code/XML
         }
         
-        if (enforceJson) {
-            val commonSchemaProps = mapOf(
-                "type" to "object",
-                "properties" to mapOf(
-                    "scratchpad" to mapOf("type" to "string", "description" to "Internal reasoning and failure analysis."),
-                    "type" to mapOf("type" to "string", "enum" to listOf("question", "explanation", "command", "read_code", "write_code", "task_complete")),
-                    "content" to mapOf("type" to "string", "description" to "Primary text content or status."),
-                    "command" to mapOf("type" to "string", "description" to "Command to run (if type=command)."),
-                    "path" to mapOf("type" to "string", "description" to "File path (if type=read_code|write_code)."),
-                    "startLine" to mapOf("type" to "integer", "description" to "Starting line for read_code (1-based)."),
-                    "endLine" to mapOf("type" to "integer", "description" to "Ending line for read_code."),
-                    "code_search" to mapOf("type" to "string", "description" to "Exact code to search for (if type=write_code)."),
-                    "code_replace" to mapOf("type" to "string", "description" to "New code (if type=write_code).")
-                ),
-                "required" to listOf("scratchpad", "type", "content", "command", "path", "startLine", "endLine", "code_search", "code_replace"),
-                "additionalProperties" to false
-            )
-
-            if (isResponsesApi) {
-                 // Flattened structure for Responses API
-                 // format: { type: "json_schema", name: "...", strict: true, schema: ... }
-                 val flattenedSchema = mapOf(
-                    "type" to "json_schema",
-                    "name" to "RoninStep",
-                    "strict" to true,
-                    "schema" to commonSchemaProps
-                 )
-                 
-                 requestBody["text"] = mapOf("format" to flattenedSchema)
-                 requestBody["temperature"] = 1.0 
-            } else {
-                 // Standard Chat Completions API
-                 val jsonSchemaWrapper = mapOf(
-                    "type" to "json_schema",
-                    "json_schema" to mapOf(
-                        "name" to "RoninStep",
-                        "strict" to true,
-                        "schema" to commonSchemaProps
-                    )
-                 )
-                 requestBody["response_format"] = jsonSchemaWrapper
-                 requestBody["temperature"] = if (isReasoningModel) 1.0 else 0.1
-            }
-        } else {
-             // Planning Phase
-             requestBody["temperature"] = if (isReasoningModel) 1.0 else 0.7
-        }
+        // NOTE: JSON Schema enforcement removed for v3. XML is guided by prompt.
         
         return com.google.gson.Gson().toJson(requestBody)
     }

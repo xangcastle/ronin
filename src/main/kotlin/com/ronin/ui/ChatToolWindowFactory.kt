@@ -304,8 +304,8 @@ class ChatToolWindowFactory : ToolWindowFactory {
         }
 
         private fun processUserMessage(text: String) {
-            val contextService = project.service<com.ronin.service.ContextService>()
-            val activeFile = contextService.getActiveFileContent()
+            val configService = project.service<com.ronin.service.RoninConfigService>()
+            val activeFile = configService.getActiveFileContent()
             
             currentTask = ApplicationManager.getApplication().executeOnPooledThread {
                 try {
@@ -319,7 +319,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     sessionService.addMessage("user", text)
                     
                     val projectStructure = ReadAction.compute<String, Throwable> { 
-                        contextService.getProjectStructure() 
+                        configService.getProjectStructure() 
                     }
                     
                     if (Thread.interrupted()) throw InterruptedException()
@@ -531,9 +531,9 @@ class ChatToolWindowFactory : ToolWindowFactory {
             currentTask = ApplicationManager.getApplication().executeOnPooledThread {
                 try {
                     val llmService = project.service<LLMService>()
-                    val contextService = project.service<com.ronin.service.ContextService>()
-                    val activeFile = contextService.getActiveFileContent()
-                    val projectStructure = ReadAction.compute<String, Throwable> { contextService.getProjectStructure() }
+                    val configService = project.service<com.ronin.service.RoninConfigService>()
+                    val activeFile = configService.getActiveFileContent()
+                    val projectStructure = ReadAction.compute<String, Throwable> { configService.getProjectStructure() }
                     val contextBuilder = StringBuilder()
                     if (activeFile != null) contextBuilder.append("Active File:\n```\n$activeFile\n```\n\n")
                     contextBuilder.append(projectStructure)

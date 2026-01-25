@@ -4,6 +4,8 @@
     <name>Ronin</name>
     <vendor>Ronin</vendor>
 
+    <resource-bundle>messages.MyBundle</resource-bundle>
+
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">

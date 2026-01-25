@@ -59,7 +59,7 @@ The codebase is organized into clear functional components:
 *   **`src/main/kotlin/com/ronin/ui`**: Manages the Tool Window, Chat UI, and message history.
 *   **`src/main/kotlin/com/ronin/service`**: The agent's core logic:
     *   **`LLMService`**: Communicates with AI providers (OpenAI, etc.).
-    *   **`ContextService`**: Reads the active file and project structure to give the agent context.
+    *   **`RoninConfigService`**: Manages project context, rules, and structure.
     *   **`EditService`**: Safely modifies files in the editor using the IntelliJ SDK.
 
 ## 🧠 Agentic Architecture: The 2-Phase Loop
@@ -72,10 +72,12 @@ When you send a request, Ronin first acts as a Senior Architect. It analyzes you
 - **Output**: A clear plan presented to the user.
 - **Action**: You must read the plan and type "Proceed" (or ask for changes).
 
-### Phase 2: Execution (Builder)
-Once a plan is active, Ronin switches to "Builder Mode". It executes the plan step-by-step using a strict JSON protocol (`Step` object).
-- **Goal**: Finish the plan.
-- **Loop**: `Execute Step` -> `Analyze Result` -> `Next Step`.
+### Phase 2: Execution (Builder / Vibe Coding)
+Once a plan is active, Ronin switches to "Builder Mode". It executes the plan step-by-step using a strict **Thought-Action Protocol (XML)**.
+
+- **Thinking (`<analysis>`)**: The agent reflects on the task, analyzes the file, and plans the specific edit.
+- **Action (`<execute>`)**: The agent performs a single, atomic action (e.g., `write_code`, `run_command`).
+- **Loop**: `Analyze` -> `Execute` -> `Verify` -> `Next`.
 
 ```mermaid
 stateDiagram-v2
@@ -91,10 +93,10 @@ stateDiagram-v2
     }
     
     state Execution {
-        [*] --> NextStep
-        NextStep --> ToolExecution : JSON Command (read/write/run)
+        [*] --> Thinking
+        Thinking --> ToolExecution : XML <execute>
         ToolExecution --> ResultAnalysis : Feedback (stdout/success)
-        ResultAnalysis --> NextStep : Next Step
+        ResultAnalysis --> Thinking : Next Step
         ResultAnalysis --> Finished : "task_complete"
     }
     
@@ -121,9 +123,9 @@ sequenceDiagram
     
     loop Execution Cycle
         UI->>LLM: Mode: EXECUTION (History + Current Plan)
-        LLM-->>UI: JSON Step { type: "write_code", ... }
+        LLM-->>UI: XML Response (<analysis>...</analysis><execute>...</execute>)
         
-        UI->>Parser: Parse JSON
+        UI->>Parser: Parse XML (Extract Thought & Action)
         
         alt Write Code
             Parser->>Tools: EditService.applyEdits()
@@ -135,7 +137,7 @@ sequenceDiagram
         UI->>LLM: Feedback Loop (Auto-send Result)
     end
     
-    LLM-->>UI: JSON Step { type: "task_complete" }
+    LLM-->>UI: XML Action <task_complete>
     UI->>Agent: Clear Plan
     UI-->>User: "Task Finished"
 ```
@@ -147,13 +149,12 @@ The nervous system of the agent.
 
 | Service | Responsibility |
 | :--- | :--- |
-| **`AgentSessionService`** | **State Manager**. Tracks whether the agent is in `Planning` or `Execution` mode by holding the active `currentPlan`. |
-| **`LLMService`** | **The Brain**. Manages API connections. Dynamically switches the `systemPrompt` based on the agent's mode (Architect vs Builder). |
-| **`ResponseParser`** | **The Ear**. Parses LLM output. In execution mode, it strictly enforces a JSON Schema for actions (`command`, `read_code`, `write_code`, `task_complete`). |
-| **`ContextService`** | **The Eyes**. Reads the active file content and scans the project directory tree to provide spatial awareness. |
-| **`EditService`** | **The Hands**. Safely modifies files using `WriteCommandAction`. Supports both whole-file replacement and surgical search/replace. |
+| **`AgentSessionService`** | **State Manager**. Tracks the active session and history. Delegates persistence to `ChatStorageService`. |
+| **`LLMService`** | **The Brain**. Manages API connections. Enforces **Protocol v3 (XML/CoT)** for robust "System 2" thinking. |
+| **`ResponseParser`** | **The Ear**. Parses XML Protocol. Separates `<analysis>` (Thinking, visible in UI as thoughts) from `<execute>` (Actions). |
+| **`RoninConfigService`** | **The Context**. Reads `.roninrules`, `ronin.yaml`, and project structure to ground the agent in reality. |
+| **`EditService`** | **The Hands**. Safely modifies files using `WriteCommandAction`. Supports fuzzy matching and atomic undo. |
 | **`TerminalService`** | **The Legs**. Executes shell commands, capturing stdout/stderr to feed back into the reasoning loop. |
-| **`ChatStorageService`** | **Memory**. Persists chat history to `ronin_chat_history.xml` so context survives IDE restarts. |
 
 ### Actions (`src/main/kotlin/com/ronin/actions`)
 Context-menu triggers that bootstrap the agent with specific intents.
@@ -167,17 +168,16 @@ Context-menu triggers that bootstrap the agent with specific intents.
 ## 🗺️ Roadmap
 
 ### ✅ Architecture & Core
+- [x] **Protocol v3**: Thought-Action architecture (XML/CoT) for "System 2" reasoning.
 - [x] **Agentic Loop**: Autonomous `Command -> Execute -> Analyze` cycle.
-- [x] **2-Phase Planning**: Distinct Planning and Execution modes for complex tasks.
-- [x] **Context Awareness**: recursive project structure analysis and active file inputs.
-- [x] **Persistence**: `ChatStorageService` saves history across IDE restarts (XML-based).
-- [x] **Robust File Ops**: Create, edit, and fix files safely (`WriteCommandAction`) with feedback.
+- [x] **Context Awareness**: `RoninConfigService` for rule-based (`.roninrules`) and structural context.
+- [x] **Persistence**: `ChatStorageService` saves history across IDE restarts (JSON-based).
+- [x] **Robust File Ops**: "Safe Overwrite" checks and Fuzzy Search/Replace.
 
 ### ✅ LLM Capabilities
 - [x] **OpenAI Integration**: Full support for `gpt-4o`, `gpt-4-turbo`.
-- [x] **Advanced Reasoning**: Optimized support for `o1-preview` and `o1-mini` (Temperature 1, 5min timeout).
-- [x] **Structured Obeyance**: Strict JSON schema enforcement for reliable tool usage.
-- [ ] **Multi-Provider**: Native support for Anthropic/Claude and Ollama (Currently Beta/Mocked).
+- [x] **Advanced Reasoning**: Optimized support for `o1-preview` (Protocol v3 handles the thinking loop).
+- [x] **Reliability**: Switch from JSON Schema (fragile) to XML Protocol (robust) to avoid strict-mode failures.
 
 ### ✅ Developer Experience (DX)
 - [x] **Integrated Terminal**: Execute shell commands directly from chat options.

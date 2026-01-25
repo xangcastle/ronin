@@ -15,67 +15,60 @@ object ResponseParser {
 
     fun parseAndApply(response: String, project: Project): ParseResult {
         val sessionService = project.service<AgentSessionService>()
-        // Direct execution mode: No forced planning/approval step.
         
-        // 1. Try to parse JSON Step
-        var jsonToParse = response.trim()
-        val jsonBlockRegex = "```json([\\s\\S]*?)```".toRegex()
-        val match = jsonBlockRegex.find(response)
-        if (match != null) {
-            jsonToParse = match.groupValues[1].trim()
-        } else if (jsonToParse.startsWith("```")) {
-             jsonToParse = jsonToParse.replaceFirst("```[a-z]*".toRegex(), "").replace("```$".toRegex(), "").trim()
+        // 1. Extract <analysis> (Thinking)
+        val analysisRegex = "<analysis>([\\s\\S]*?)</analysis>".toRegex()
+        val analysisMatch = analysisRegex.find(response)
+        val scratchpad = analysisMatch?.groupValues?.get(1)?.trim()
+        
+        if (!scratchpad.isNullOrEmpty()) {
+            println("Ronin Thinking (Protocol v3): $scratchpad")
         }
 
-        try {
-            val gson = com.google.gson.Gson()
-            val step = try {
-                 gson.fromJson(jsonToParse, Map::class.java) as? Map<String, Any>
-            } catch (e: Exception) {
-                 // Try one more time by finding the first { and last }
-                 val firstBrace = jsonToParse.indexOf('{')
-                 val lastBrace = jsonToParse.lastIndexOf('}')
-                 if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
-                     gson.fromJson(jsonToParse.substring(firstBrace, lastBrace + 1), Map::class.java) as? Map<String, Any>
-                 } else null
+        // 2. Extract <execute> (Action)
+        val executeRegex = "<execute>([\\s\\S]*?)</execute>".toRegex()
+        val executeMatch = executeRegex.find(response)
+        
+        if (executeMatch == null) {
+            // Conversational response (no action)
+            var cleanText = response.replace(analysisRegex, "").trim()
+            if (cleanText.isEmpty() && !scratchpad.isNullOrEmpty()) {
+                // Fallback: If no text but we have thinking, show the thinking to avoid "silent death"
+                cleanText = "🤔 **Thinking Process:**\n\n$scratchpad"
             }
+            return ParseResult(cleanText, scratchpad = scratchpad)
+        }
+
+        val executeContent = executeMatch.groupValues[1].trim()
+        
+        // 3. Parse <command> inside <execute>
+        // Format: <command name="..."> ... </command>
+        val commandRegex = "<command\\s+name=\"([^\"]+)\">([\\s\\S]*?)</command>".toRegex()
+        val commandMatch = commandRegex.find(executeContent)
+        
+        if (commandMatch != null) {
+            val commandName = commandMatch.groupValues[1]
+            val commandBody = commandMatch.groupValues[2]
             
-            if (step != null && (step.containsKey("type") || step.containsKey("command"))) {
-                val type = step["type"] as? String
-                val content = step["content"] as? String ?: ""
-                val scratchpad = step["scratchpad"] as? String ?: ""
-                
-                if (scratchpad.isNotEmpty()) {
-                    println("Ronin Thinking: $scratchpad")
+            // Extract Arguments
+            val args = parseArguments(commandBody)
+            val contentArg = args["content"] ?: "" // Default message content if any
+            
+            return when (commandName) {
+                "task_complete" -> {
+                    sessionService.clearSession()
+                    ParseResult("✅ **TASK COMPLETED**\n\n$contentArg", scratchpad = scratchpad)
                 }
-                
-                return when (type) {
-                    "question", "explanation" -> {
-                        ParseResult(content, scratchpad = scratchpad)
-                    }
-                    "task_complete" -> {
-                        sessionService.clearSession()
-                        ParseResult("✅ **TASK COMPLETED**\n\n$content", scratchpad = scratchpad)
-                    }
-                    "command" -> {
-                         // Extract command
-                         val rawCmd = step["command"] ?: step["cmd"] ?: step["execute"]
-                         val args = step["args"]
-                         val commandStr = if (rawCmd != null && args is List<*>) {
-                             "$rawCmd " + args.joinToString(" ")
-                         } else {
-                             rawCmd?.toString()
-                         }
-                         ParseResult(content, commandStr, scratchpad = scratchpad)
-                    }
-                    "read_code" -> {
-                        val path = step["path"] as? String
-                        val startLine = (step["startLine"] as? Number)?.toInt() ?: 1
-                        val endLine = (step["endLine"] as? Number)?.toInt() ?: -1
-                        
-                        if (path != null) {
-                            val editService = project.service<EditService>()
-                            try {
+                "read_code" -> {
+                    val path = args["path"]
+                    val startLine = args["start_line"]?.toIntOrNull() ?: 1
+                    val endLine = args["end_line"]?.toIntOrNull() ?: -1
+                    
+                    if (path != null) {
+                        val editService = project.service<EditService>()
+                        try {
+                            var output: String? = null
+                            com.intellij.openapi.application.ApplicationManager.getApplication().invokeAndWait {
                                 val vFile = editService.findFile(path)
                                 if (vFile != null) {
                                     val lines = String(vFile.contentsToByteArray()).lines()
@@ -86,60 +79,109 @@ object ResponseParser {
                                     val fileContent = selectedLines.joinToString("\n")
                                     val isTruncated = endIdx < lines.size || startIdx > 0
                                     
-                                    val output = "**Reading File:** `$path` (Lines $startLine-$endIdx of ${lines.size})\n" +
+                                    output = "**Reading File:** `$path` (Lines $startLine-$endIdx of ${lines.size})\n" +
                                                "```\n$fileContent\n```" +
                                                (if (isTruncated) "\n...(truncated)" else "")
-                                    
-                                    ParseResult(content, scratchpad = scratchpad, requiresFollowUp = true, toolOutput = output)
-                                } else {
-                                    ParseResult("Error: File not found at $path (Tried relative and absolute resolution)", scratchpad = scratchpad, requiresFollowUp = true)
                                 }
-                            } catch(e: Exception) {
-                                ParseResult("Error reading file: ${e.message}", scratchpad = scratchpad, requiresFollowUp = true)
                             }
-                        } else {
-                            ParseResult("Error: No path provided for read_code", scratchpad = scratchpad)
-                        }
-                    }
-                    "write_code" -> {
-                        val path = step["path"] as? String
-                        val search = step["code_search"] as? String
-                        val replace = step["code_replace"] as? String
-                        
-                        if (path != null && replace != null) {
-                            val editService = project.service<EditService>()
-                            // Use search/replace if search is provided, else overwrite? Schema says search is required.
-                            // If search is empty/null, maybe append or overwrite? Let's assume replaceFileContent for now if search missing?
-                            // But Schema says 'code_search' description "Exact code to search for".
-                            val result = if (search.isNullOrBlank()) {
-                                editService.replaceFileContent(path, replace)
+                            
+                            if (output != null) {
+                                ParseResult("Reading $path...", scratchpad = scratchpad, requiresFollowUp = true, toolOutput = output)
                             } else {
-                                val results = editService.applyEdits(listOf(EditService.EditOperation(path, search, replace)))
-                                if (results.isNotEmpty()) "Applied 1 edit." else "Failed to apply edit (search string not found)."
+                                ParseResult("Error: File not found at $path", scratchpad = scratchpad, requiresFollowUp = true)
                             }
-                            val output = "**Edit Applied to `$path`**: $result"
-                            ParseResult(content, scratchpad = scratchpad, requiresFollowUp = true, toolOutput = output)
-                        } else {
-                            ParseResult("Error: Missing path, search, or replace for write_code", scratchpad = scratchpad, requiresFollowUp = true)
+                        } catch(e: Exception) {
+                             ParseResult("Error reading file: ${e.message}", scratchpad = scratchpad, requiresFollowUp = true)
                         }
+                    } else {
+                         ParseResult("Error: Missing 'path' argument for read_code", scratchpad = scratchpad)
                     }
-                    else -> ParseResult(response) // Unknown type fallback
                 }
-            } else {
-                 // Fallback for non-step JSON or partial hallucination
-                 // Try to handle legacy hallucination of "commands" array just in case
-                 if (step != null && step.containsKey("commands")) {
-                     // ... logic from before ...
-                     // Actually, if we are in Execution mode, we shouldn't really fall back to legacy unless the model failed completely.
-                     // But let's keep it safe.
-                 }
+                "write_code" -> {
+                    val path = args["path"]
+                    // content tag (CDATAs) are handled by parseArguments specialized logic or basic regex below if needed
+                    // But our parseArguments handles <arg> tags. 
+                    // Special handling for code content usually in <content> or <arg name="code_replace">
+                    
+                    // Let's assume the prompt instructs: <arg name="code_replace"><![CDATA[...]]></arg>
+                    // OR <content><![CDATA[...]]></content> if we defined that.
+                    // Implementation Plan said: <content><![CDATA[...]]></content>
+                    
+                    // Let's refine parseArguments to capture <content> as a key "content"
+                    
+                    val replace = args["content"] // From <content> tag
+                    val search = args["code_search"] // from <arg name="code_search">
+                    val startLine = args["start_line"]?.toIntOrNull()
+                    val endLine = args["end_line"]?.toIntOrNull()
+                    
+                    if (path != null && replace != null) {
+                         val editService = project.service<EditService>()
+                         var resultStr = "No result returned."
+                         
+                         com.intellij.openapi.application.ApplicationManager.getApplication().invokeAndWait {
+                             val result = if (startLine != null && endLine != null) {
+                                    val results = editService.applyEdits(listOf(EditService.EditOperation(path, null, replace, startLine = startLine, endLine = endLine)))
+                                    if (results.isNotEmpty()) results.first() else "No result returned."
+                             } else if (search.isNullOrBlank()) {
+                                    editService.replaceFileContent(path, replace)
+                             } else {
+                                    val results = editService.applyEdits(listOf(EditService.EditOperation(path, search, replace)))
+                                    if (results.isNotEmpty()) "Applied 1 edit." else "Failed to apply edit (search string not found)."
+                             }
+                             resultStr = result
+                             
+                             // Auto-Validation
+                             com.intellij.psi.PsiDocumentManager.getInstance(project).commitAllDocuments()
+                         }
+                         
+                         val validationService = project.service<ValidationService>()
+                         val validation = validationService.validateFile(path)
+                         val validationMsg = if (validation.isValid) "✅ Syntax Valid" else "⚠️ **SYNTAX ERRORS DETECTED**: ${validation.error}"
+                         
+                         val output = "**Edit Applied to `$path`**: $resultStr\n**Validation**: $validationMsg"
+                         ParseResult("Editing $path...", scratchpad = scratchpad, requiresFollowUp = true, toolOutput = output)
+                    } else {
+                        ParseResult("Error: Missing 'path' or 'content' for write_code", scratchpad = scratchpad, requiresFollowUp = true)
+                    }
+                }
+                "run_command" -> {
+                     val cmd = args["command"]
+                     if (cmd != null) {
+                         ParseResult("Executing shell command...", commandToRun = cmd, scratchpad = scratchpad)
+                     } else {
+                         ParseResult("Error: Missing 'command' argument", scratchpad = scratchpad)
+                     }
+                }
+                else -> ParseResult("Unknown command: $commandName", scratchpad = scratchpad)
             }
-        } catch (e: Exception) {
-            // Not JSON
         }
         
-        // Fallback: If we have a Plan but received non-JSON text, just return it.
-        // This might happen if the model refuses to output JSON.
-        return ParseResult(response)
+        return ParseResult(response.replace(analysisRegex, "").replace(executeRegex,"").trim(), scratchpad = scratchpad)
+    }
+
+    private fun parseArguments(xmlBody: String): Map<String, String> {
+        val args = mutableMapOf<String, String>()
+        
+        // Match <arg name="...">value</arg>
+        val argRegex = "<arg\\s+name=\"([^\"]+)\">([\\s\\S]*?)</arg>".toRegex()
+        argRegex.findAll(xmlBody).forEach { match ->
+            args[match.groupValues[1]] = match.groupValues[2].trim()
+        }
+        
+        // Match <content>...</content> (Special case for large code blocks)
+        val contentRegex = "<content>([\\s\\S]*?)</content>".toRegex()
+        val contentMatch = contentRegex.find(xmlBody)
+        if (contentMatch != null) {
+            val raw = contentMatch.groupValues[1].trim()
+            // Strip CDATA if present
+            val clean = if (raw.startsWith("<![CDATA[") && raw.endsWith("]]>")) {
+                raw.substring(9, raw.length - 3)
+            } else {
+                raw
+            }
+            args["content"] = clean
+        }
+        
+        return args
     }
 }
