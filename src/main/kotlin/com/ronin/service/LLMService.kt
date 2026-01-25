@@ -19,6 +19,13 @@ class LLMServiceImpl : LLMService {
         // Let's add it to the latest user message for now.
         val fullPrompt = if (context != null) {
             val allowedTools = settings.allowedTools.ifBlank { "git, docker, kubectl, argocd, aws, bazel" }
+            val coreWorkflow = settings.coreWorkflow.ifBlank {
+                """
+                1. **PLAN**: Analyze request.
+                2. **EXECUTE**: Return the JSON with commands and edits.
+                3. **VERIFY**: Check if the goal is achieved. Only run verification commands (test/build) if necessary to validate code changes. Do NOT verify simple info queries (e.g. pwd, ls).
+                """.trimIndent()
+            }
             
             """
             System Instructions:
@@ -53,9 +60,7 @@ class LLMServiceImpl : LLMService {
             - Do NOT re-write the whole file if you only need to change one function.
             
             **CORE WORKFLOW:**
-            1. **PLAN**: Analyze request.
-            2. **EXECUTE**: Return the JSON with commands and edits.
-            3. **VERIFY**: Always include a verification command (test/build) in the `commands` list.
+            $coreWorkflow
             
             Context:
             $context

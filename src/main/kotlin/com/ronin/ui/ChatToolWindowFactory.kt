@@ -127,10 +127,10 @@ class ChatToolWindowFactory : ToolWindowFactory {
             inputArea.addKeyListener(object : java.awt.event.KeyAdapter() {
                 override fun keyPressed(e: java.awt.event.KeyEvent) {
                     if (e.keyCode == java.awt.event.KeyEvent.VK_ENTER) {
+                        e.consume() // Always consume specific Enter actions to prevent double-handling
                         if (e.isShiftDown) {
-                            // Newline
+                            inputArea.replaceSelection("\n")
                         } else {
-                            e.consume()
                             sendMessage()
                         }
                     }
@@ -365,7 +365,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
                         }
                         
                         appendToLastTerminalBlock("\n[Finished]")
-                        val followUpPrompt = "Command Output:\n```\n$output\n```\nIf there are errors, please fix them."
+                        val followUpPrompt = "Command Output:\n```\n$output\n```\nAnalyze the output. If the previous command was successful and fully answers the user's request, simply report the result. Do NOT run more commands unless explicitly needed."
                         val summary = "Command executed. Output (${output.lines().size} lines) sent to Ronin."
                         handleFollowUp(followUpPrompt, summary)
                     }
