@@ -35,9 +35,18 @@ object ResponseParser {
 
         try {
             val gson = com.google.gson.Gson()
-            val step = gson.fromJson(jsonToParse, Map::class.java) as? Map<String, Any>
+            val step = try {
+                 gson.fromJson(jsonToParse, Map::class.java) as? Map<String, Any>
+            } catch (e: Exception) {
+                 // Try one more time by finding the first { and last }
+                 val firstBrace = jsonToParse.indexOf('{')
+                 val lastBrace = jsonToParse.lastIndexOf('}')
+                 if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
+                     gson.fromJson(jsonToParse.substring(firstBrace, lastBrace + 1), Map::class.java) as? Map<String, Any>
+                 } else null
+            }
             
-            if (step != null && step.containsKey("type")) {
+            if (step != null && (step.containsKey("type") || step.containsKey("command"))) {
                 val type = step["type"] as? String
                 val content = step["content"] as? String ?: ""
                 

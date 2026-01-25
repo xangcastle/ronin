@@ -61,81 +61,141 @@ The codebase is organized into clear functional components:
     *   **`LLMService`**: Communicates with AI providers (OpenAI, etc.).
     *   **`ContextService`**: Reads the active file and project structure to give the agent context.
     *   **`EditService`**: Safely modifies files in the editor using the IntelliJ SDK.
-## 🧠 Agentic Architecture
- 
-Ronin is an autonomous loop rooted in the `ChatToolWindowFactory` but triggered via multiple entry points.
- 
+
+## 🧠 Agentic Architecture: The 2-Phase Loop
+
+Ronin has evolved from a simple chatbot into a **2-Phase Agent** that thinks before it acts.
+
+### Phase 1: Planning (Architect)
+When you send a request, Ronin first acts as a Senior Architect. It analyzes your request and the codebase to generate a **Plain Text Implementation Plan**.
+- **Goal**: Create a step-by-step guide.
+- **Output**: A clear plan presented to the user.
+- **Action**: You must read the plan and type "Proceed" (or ask for changes).
+
+### Phase 2: Execution (Builder)
+Once a plan is active, Ronin switches to "Builder Mode". It executes the plan step-by-step using a strict JSON protocol (`Step` object).
+- **Goal**: Finish the plan.
+- **Loop**: `Execute Step` -> `Analyze Result` -> `Next Step`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    
+    Idle --> Planning : User Request
+    
+    state Planning {
+        [*] --> Analyzing
+        Analyzing --> PlanProposal : Generate Plan
+        PlanProposal --> Analyzing : User Feedback
+        PlanProposal --> Execution : User Approves ("Proceed")
+    }
+    
+    state Execution {
+        [*] --> NextStep
+        NextStep --> ToolExecution : JSON Command (read/write/run)
+        ToolExecution --> ResultAnalysis : Feedback (stdout/success)
+        ResultAnalysis --> NextStep : Next Step
+        ResultAnalysis --> Finished : "task_complete"
+    }
+    
+    Finished --> Idle : Done
+```
+
+### The Execution Loop (Detailed)
+
 ```mermaid
 sequenceDiagram
-    participant Action as Editor Action
+    participant User
     participant UI as Chat UI
-    participant Context as ContextService
+    participant Agent as AgentSession
     participant LLM as LLMService
     participant Parser as ResponseParser
-    participant Tools as Tools (Edit/Terminal)
+    participant Tools as Edit/Terminal
 
-    Action->>UI: explicit triggers (Explain/Fix)
-    User->>UI: Manual Input
+    User->>UI: "Refactor this class"
+    UI->>LLM: Mode: PLANNING
+    LLM-->>UI: "Here is the plan: 1. Rename..."
     
-    loop Agentic Cycle
-        UI->>Context: Gather Context (Active File + Tree)
-        UI->>LLM: Send Prompt + History
-        LLM-->>UI: Response (Text + Commands)
+    User->>UI: "Proceed"
+    UI->>Agent: Plan Locked
+    
+    loop Execution Cycle
+        UI->>LLM: Mode: EXECUTION (History + Current Plan)
+        LLM-->>UI: JSON Step { type: "write_code", ... }
         
-        UI->>Parser: Parse Response
+        UI->>Parser: Parse JSON
         
-        alt Has File Edit
-            Parser->>Tools: EditService.replaceFileContent()
-            Tools-->>UI: "📝 Created/Updated File"
-        end
-        
-        alt Has Terminal Command
+        alt Write Code
+            Parser->>Tools: EditService.applyEdits()
+        else Run Command
             Parser->>Tools: TerminalService.runCommand()
-            Tools-->>UI: Stream Output
-            UI->>LLM: Auto-FollowUp (Command Result)
         end
+        
+        Tools-->>UI: Result ("Success" / Output)
+        UI->>LLM: Feedback Loop (Auto-send Result)
     end
+    
+    LLM-->>UI: JSON Step { type: "task_complete" }
+    UI->>Agent: Clear Plan
+    UI-->>User: "Task Finished"
 ```
- 
+
 ## ⚙️ System Components
- 
+
 ### Services (`src/main/kotlin/com/ronin/service`)
 The nervous system of the agent.
- 
+
 | Service | Responsibility |
 | :--- | :--- |
-| **`LLMService`** | Manages API connections (OpenAI/o1). Handles model filtering, timeouts (5m for reasoning), and parameter optimization. |
-| **`ContextService`** | "Eyes" of the agent. Reads the active file content and scans the project directory tree (ignoring `node_modules`, `build`, etc.) to provide spatial awareness. |
-| **`EditService`** | "Hands" of the agent. Safely creates directories and modifies files using `WriteCommandAction`. Returns detailed success/failure feedback. |
-| **`TerminalService`** | "Legs" of the agent. Executes shell commands, capturing stdout/stderr to feed back into the reasoning loop. |
-| **`ResponseParser`** | The "Ear". Parses raw LLM output to detect intents like `[UPDATED_FILE]` or `[EXECUTE]`. |
-| **`ChatStorageService`** | The "Memory". Persists chat history to `ronin_chat_history.xml` so context survives IDE restarts. |
- 
+| **`AgentSessionService`** | **State Manager**. Tracks whether the agent is in `Planning` or `Execution` mode by holding the active `currentPlan`. |
+| **`LLMService`** | **The Brain**. Manages API connections. Dynamically switches the `systemPrompt` based on the agent's mode (Architect vs Builder). |
+| **`ResponseParser`** | **The Ear**. Parses LLM output. In execution mode, it strictly enforces a JSON Schema for actions (`command`, `read_code`, `write_code`, `task_complete`). |
+| **`ContextService`** | **The Eyes**. Reads the active file content and scans the project directory tree to provide spatial awareness. |
+| **`EditService`** | **The Hands**. Safely modifies files using `WriteCommandAction`. Supports both whole-file replacement and surgical search/replace. |
+| **`TerminalService`** | **The Legs**. Executes shell commands, capturing stdout/stderr to feed back into the reasoning loop. |
+| **`ChatStorageService`** | **Memory**. Persists chat history to `ronin_chat_history.xml` so context survives IDE restarts. |
+
 ### Actions (`src/main/kotlin/com/ronin/actions`)
 Context-menu triggers that bootstrap the agent with specific intents.
- 
+
 *   **`ExplainCodeAction`**: Sends selected code with "Explain this..." prompt.
 *   **`FixCodeAction`**: Sends selected code with "Fix bugs..." prompt.
 *   **`ImproveCodeAction`**: Asks for refactoring ideas.
 *   **`GenerateUnitTestsAction`**: Asks for test coverage.
 *   **`BaseRoninAction`**: Abstract base that handles the pipeline: `Open Window -> Gather Context -> Send -> Apply`.
- 
+
 ## 🗺️ Roadmap
- 
+
 ### ✅ Architecture & Core
 - [x] **Agentic Loop**: Autonomous `Command -> Execute -> Analyze` cycle.
+- [x] **2-Phase Planning**: Distinct Planning and Execution modes for complex tasks.
 - [x] **Context Awareness**: recursive project structure analysis and active file inputs.
 - [x] **Persistence**: `ChatStorageService` saves history across IDE restarts (XML-based).
 - [x] **Robust File Ops**: Create, edit, and fix files safely (`WriteCommandAction`) with feedback.
- 
+
 ### ✅ LLM Capabilities
 - [x] **OpenAI Integration**: Full support for `gpt-4o`, `gpt-4-turbo`.
 - [x] **Advanced Reasoning**: Optimized support for `o1-preview` and `o1-mini` (Temperature 1, 5min timeout).
-- [x] **Unlimited Context**: No arbitrary token limits (`max_tokens` removed); full model capacity enabled.
+- [x] **Structured Obeyance**: Strict JSON schema enforcement for reliable tool usage.
 - [ ] **Multi-Provider**: Native support for Anthropic/Claude and Ollama (Currently Beta/Mocked).
- 
+
 ### ✅ Developer Experience (DX)
 - [x] **Integrated Terminal**: Execute shell commands directly from chat options.
 - [x] **Responsive UI**: Fluid message bubbles (`GridBagLayout`) that respect window size.
 - [x] **Smart Logs**: Command outputs are summarized in UI to prevent clutter, but sent fully to LLM.
+- [x] **Slash Commands**: Use `/init` to boostrap `ronin.yaml` or custom commands from `ronin/commands/*.md`.
 - [ ] **Multimodal**: Drag-and-drop image support for visual debugging.
+
+## ⚡ Slash Commands
+
+Ronin supports commands to trigger specific workflows:
+
+### Built-in
+*   **`/init`**: Automatically scans your Bazel workspace using `bazel query` and generates the `ronin.yaml` registry file.
+
+### Custom
+You can define your own commands by creating Markdown files in `ronin/commands/`:
+1.  Create `ronin/commands/refactor.md`.
+2.  Write your prompt template in the file.
+3.  Type `/refactor` in the chat.
+4.  Ronin effectively "pastes" that file content as your prompt.

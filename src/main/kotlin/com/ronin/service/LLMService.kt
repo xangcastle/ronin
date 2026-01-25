@@ -41,16 +41,14 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             $currentPlan
             
             **INSTRUCTIONS:**
-            - Review the history and the plan.
-            - meticulousy determine the NEXT logical step.
+            - You are in a recursive execution loop. 
+            - Review the history carefully. If you see a 'Command Output', that means the previous step is DONE. 
+            - Move to the NEXT step in the plan. Do NOT repeat finished steps.
+            - Be DECISIVE. Do not explain your thoughts in plain text unless you are asking a 'question'.
             - Respond in strictly valid JSON matching the schema.
-            - Allowed Types:
-              - "question": Ask the user for clarification.
-              - "explanation": Explain something to the user.
-              - "command": Execute a terminal command.
-              - "read_code": Read a file's content.
-              - "write_code": Modify a file.
-              - "task_complete": When the goal is fully achieved.
+            
+            **SCHEMA:**
+            {"type": "command|read_code|write_code|question|explanation|task_complete", "content": "reasoning", "command": "...", "path": "...", "code_search": "...", "code_replace": "..."}
             
             User Request: $prompt
             Context: $context
@@ -170,38 +168,36 @@ class LLMServiceImpl(private val project: Project) : LLMService {
     }
 
     private fun extractContentFromResponse(json: String): String {
-        // Manual parsing to avoid StackOverflowError with regex on large responses
-        val key = "\"content\""
-        var startIndex = json.indexOf(key)
-        if (startIndex == -1) return json
+        val contentKey = "\"content\":"
+        val contentStartIdx = json.indexOf(contentKey)
+        if (contentStartIdx == -1) return json
         
-        // Move past "content"
-        startIndex += key.length
+        val valueStartIdx = json.indexOf("\"", contentStartIdx + contentKey.length)
+        if (valueStartIdx == -1) return json
         
-        // Find the start quote of the value
-        val quoteStart = json.indexOf("\"", startIndex)
-        if (quoteStart == -1) return json
-        
-        // Iterate to find the matching end quote, handling escapes
-        var current = quoteStart + 1
-        while (current < json.length) {
-            when (json[current]) {
-                '\\' -> {
-                    // Skip the next character (escaped)
-                    current += 2
+        val sb = StringBuilder()
+        var escaped = false
+        for (i in valueStartIdx + 1 until json.length) {
+            val c = json[i]
+            if (escaped) {
+                when (c) {
+                    'n' -> sb.append('\n')
+                    'r' -> sb.append('\r')
+                    't' -> sb.append('\t')
+                    '\\' -> sb.append('\\')
+                    '\"' -> sb.append('\"')
+                    else -> sb.append(c)
                 }
-                '"' -> {
-                    // Found the end
-                    val content = json.substring(quoteStart + 1, current)
-                    return content.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
-                }
-                else -> {
-                    current++
-                }
+                escaped = false
+            } else if (c == '\\') {
+                escaped = true
+            } else if (c == '\"') {
+                break 
+            } else {
+                sb.append(c)
             }
         }
-        
-        return json
+        return sb.toString()
     }
 
     override fun getAvailableModels(provider: String): List<String> {
