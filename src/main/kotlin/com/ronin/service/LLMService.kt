@@ -43,9 +43,11 @@ class LLMServiceImpl(private val project: Project) : LLMService {
                 </command>
             </execute>
             
-            **CRITICAL:** 
-            - IF YOU ARE JUST REPLYING TO THE USER (NO CODE ACTION), USE `task_complete` WITH YOUR MESSAGE AS `content`.
-            - DO NOT OUTPUT ONLY ANALYSIS. AUTOMATION WILL FAIL.
+            **CRITICAL RULES:** 
+            1. **MANDATORY EXECUTION**: You MUST output an `<execute>` block in every single turn.
+            2. **NO OPEN LOOPS**: If you are just replying to the user (no code action), you MUST use `task_complete` with your message as `content`.
+            3. **ANTI-STALLING**: Do NOT stop at `<analysis>`. If you stop, the system hangs. You must proceed to `<execute>`.
+            4. **AUTOMATION FAILURE**: If you output only analysis, the automation fails.
             
             **AVAILABLE COMMANDS:**
             
@@ -96,6 +98,8 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             - **STRICT ANTI-REPETITION**: If a command fails, do not retry blindly. Read the file, understand the state, then fix.
             
             User Request: $prompt
+            
+            (REMINDER: You MUST end your response with an <execute> block containing a command. Do not just analyze.)
             Context: $context
         """.trimIndent()
 
@@ -134,16 +138,33 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
             .build()
 
-        try {
-            val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-            if (response.statusCode() == 200) {
-                return extractContentFromResponse(response.body())
-            } else {
-                return "Error: ${response.statusCode()} - ${response.body()}"
+        var attempt = 0
+        val maxRetries = 3
+        
+        while (attempt < maxRetries) {
+            try {
+                attempt++
+                val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
+                val statusCode = response.statusCode()
+                
+                if (statusCode == 200) {
+                    return extractContentFromResponse(response.body())
+                } else if ((statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504) && attempt < maxRetries) {
+                     // Retryable error
+                     try { Thread.sleep(1000L * attempt) } catch (e: InterruptedException) { Thread.currentThread().interrupt(); return "Error: Interrupted" }
+                     continue
+                } else {
+                    return "Error: $statusCode - ${response.body()}"
+                }
+            } catch (e: Exception) {
+                if (attempt < maxRetries) {
+                    try { Thread.sleep(1000L * attempt) } catch (ie: InterruptedException) { Thread.currentThread().interrupt(); return "Error: Interrupted" }
+                    continue
+                }
+                return "Error sending request: ${e.message}"
             }
-        } catch (e: Exception) {
-            return "Error sending request: ${e.message}"
         }
+        return "Error: Failed after $maxRetries attempts."
     }
 
     private fun pruneHistory(history: List<Map<String, String>>, maxMessages: Int): List<Map<String, String>> {
