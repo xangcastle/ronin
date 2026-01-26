@@ -14,14 +14,23 @@ class LLMServiceImpl(private val project: Project) : LLMService {
 
     override fun sendMessage(prompt: String, context: String?, history: List<Map<String, String>>, images: List<String>): String {
         val settings = com.ronin.settings.RoninSettingsState.instance
+        
+        // Resolve Active Stance
+        val activeStanceName = settings.activeStance
+        val stance = settings.stances.find { it.name == activeStanceName } 
+            ?: throw IllegalStateException("Active stance '$activeStanceName' not found in configuration.")
+            
         val configService = project.service<RoninConfigService>()
         val projectContext = configService.getProjectStructure()
         val projectRules = configService.getProjectRules()
-                val systemPrompt = """
-            You are Ronin, an autonomous agentic developer assistant.
+        
+        val systemPrompt = """
+            You are Ronin, engaging in the stance of: "${stance.name}".
+            ${stance.systemPrompt}
             
             **ENVIRONMENT:**
             - You are working in a Bazel-based monorepo.
+            - Scope: ${stance.scope}
             - $projectContext
             - Allowed Tools: ${settings.allowedTools}
             
@@ -103,20 +112,18 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             Context: $context
         """.trimIndent()
 
-        if (settings.provider == "OpenAI") {
-            // enforceJson = false for v3 Protocol (XML)
-            return sendOpenAIRequest(systemPrompt, history, settings, false)
+        if (stance.provider == "OpenAI") {
+            val apiKey = com.ronin.settings.CredentialHelper.getApiKey(stance.credentialId)
+            val finalKey = if (!apiKey.isNullOrBlank()) apiKey else System.getenv("OPENAI_API_KEY")
+            
+            if (finalKey.isNullOrBlank()) return "Error: No API Key found for credential ID '${stance.credentialId}'."
+            
+            return sendOpenAIRequest(systemPrompt, history, stance.model, finalKey, false)
         }
-        return "Error: Only OpenAI supported for v2 Architecture currently."
+        return "Error: Provider '${stance.provider}' not supported yet."
     }
 
-    private fun sendOpenAIRequest(systemPrompt: String, history: List<Map<String, String>>, settings: com.ronin.settings.RoninSettingsState, enforceJson: Boolean): String {
-        val apiKey = com.ronin.settings.CredentialHelper.getApiKey("openaiApiKey")
-            ?: System.getenv("OPENAI_API_KEY")
-        
-        if (apiKey.isNullOrBlank()) return "Error: OpenAI API Key not found."
-
-        val model = settings.model.ifBlank { "gpt-4o" }
+    private fun sendOpenAIRequest(systemPrompt: String, history: List<Map<String, String>>, model: String, apiKey: String, enforceJson: Boolean): String {
         
         // Prune history to manage token limits (approx heuristic)
         val prunedHistory = pruneHistory(history, 20)
@@ -294,26 +301,7 @@ class LLMServiceImpl(private val project: Project) : LLMService {
     }
 
     override fun fetchAvailableModels(provider: String): List<String> {
-        if (provider != "OpenAI") return getAvailableModels(provider)
-
-        val apiKey = com.ronin.settings.CredentialHelper.getApiKey("openaiApiKey")
-        if (apiKey.isNullOrBlank()) return getAvailableModels(provider)
-
-        val request = java.net.http.HttpRequest.newBuilder()
-            .timeout(java.time.Duration.ofSeconds(10))
-            .uri(java.net.URI.create("https://api.openai.com/v1/models"))
-            .header("Authorization", "Bearer $apiKey")
-            .GET()
-            .build()
-            
-        try {
-            val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-            if (response.statusCode() == 200) {
-                return parseModelsJson(response.body())
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        // Dynamic fetching temporarily disabled during Stance refactor
         return getAvailableModels(provider)
     }
 }

@@ -4,93 +4,247 @@ import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBTextField
+import com.intellij.ui.components.JBTextArea
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.FormBuilder
-import javax.swing.JComponent
-import javax.swing.JPanel
-import javax.swing.JLabel
+import java.awt.BorderLayout
+import javax.swing.*
+import java.util.UUID
 
 import com.ronin.MyBundle
+import com.ronin.settings.RoninSettingsState.Stance
 
 class RoninSettingsConfigurable : Configurable {
-    private var settingsPanel: JPanel? = null
-    private val openaiApiKeyField = JBPasswordField()
-    private val anthropicApiKeyField = JBPasswordField()
-    private val googleApiKeyField = JBPasswordField()
-    private val kimiApiKeyField = JBPasswordField()
-    private val minimaxApiKeyField = JBPasswordField()
+    private var mainPanel: JPanel? = null
+    
+    // Stance Management
+    private val stanceSelector = ComboBox<String>()
+    private val addStanceButton = JButton("Add Stance")
+    private val removeStanceButton = JButton("Remove Stance")
+    
+    // Stance Fields
+    private val nameField = JBTextField()
+    private val providerComboBox = ComboBox(arrayOf("OpenAI", "Anthropic", "Google", "Kimi", "Minimax", "Ollama"))
+    private val modelField = JBTextField()
+    private val scopeField = JBTextField()
+    private val credentialIdField = JBTextField()
+    private val apiKeyField = JBPasswordField() // Used to update key
+    private val systemPromptField = JBTextArea(5, 40)
+    
+    // Global Fields
     private val ollamaBaseUrlField = JBTextField()
     private val allowedToolsField = JBTextField()
-    private val coreWorkflowField = com.intellij.ui.components.JBTextArea(5, 40)
-    
-    private val providerComboBox = ComboBox(arrayOf("OpenAI", "Anthropic", "Google", "Kimi", "Minimax", "Ollama"))
+    private val coreWorkflowField = JBTextArea(5, 40)
+
+    // Local State
+    private var localStances = mutableListOf<Stance>()
+    private var currentStanceIndex = -1
 
     override fun getDisplayName(): String = "Ronin"
 
     override fun createComponent(): JComponent? {
+        systemPromptField.lineWrap = true
+        systemPromptField.wrapStyleWord = true
         coreWorkflowField.lineWrap = true
         coreWorkflowField.wrapStyleWord = true
-        
-        settingsPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent(JLabel(MyBundle.message("settings.provider")), providerComboBox)
+
+        // Top Bar: Selector + Buttons
+        val topPanel = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT))
+        topPanel.add(JLabel("Select Stance:"))
+        stanceSelector.prototypeDisplayValue = "The Daimyo (General Architect) - Extra Width"
+        topPanel.add(stanceSelector)
+        topPanel.add(addStanceButton)
+        topPanel.add(removeStanceButton)
+
+        // Stance Form
+        val stanceForm = FormBuilder.createFormBuilder()
+            .addLabeledComponent("Name:", nameField)
+            .addLabeledComponent("Provider:", providerComboBox)
+            .addLabeledComponent("Model:", modelField)
+            .addLabeledComponent("Scope (Tip: Use bazel targets like //core/...):", scopeField)
+            .addLabeledComponent("Credential ID:", credentialIdField)
+            .addLabeledComponent("Update API Key (Leave empty to keep):", apiKeyField)
+            .addLabeledComponent("System Prompt:", JBScrollPane(systemPromptField))
             .addSeparator()
-            .addLabeledComponent(JLabel(MyBundle.message("settings.openai_key")), openaiApiKeyField)
-            .addLabeledComponent(JLabel(MyBundle.message("settings.anthropic_key")), anthropicApiKeyField)
-            .addLabeledComponent(JLabel(MyBundle.message("settings.google_key")), googleApiKeyField)
-            .addLabeledComponent(JLabel(MyBundle.message("settings.kimi_key")), kimiApiKeyField)
-            .addLabeledComponent(JLabel(MyBundle.message("settings.minimax_key")), minimaxApiKeyField)
+            .panel
+
+        // Global Form
+        val globalForm = FormBuilder.createFormBuilder()
             .addSeparator()
-            .addLabeledComponent(JLabel(MyBundle.message("settings.ollama_url")), ollamaBaseUrlField)
-            .addLabeledComponent(JLabel(MyBundle.message("settings.allowed_tools")), allowedToolsField)
             .addSeparator()
-            .addLabeledComponent(JLabel(MyBundle.message("settings.core_workflow")), com.intellij.ui.components.JBScrollPane(coreWorkflowField))
+            .addLabeledComponent(MyBundle.message("settings.ollama_url"), ollamaBaseUrlField)
+            .addLabeledComponent(MyBundle.message("settings.allowed_tools"), allowedToolsField)
+            .addLabeledComponent(MyBundle.message("settings.core_workflow"), JBScrollPane(coreWorkflowField))
             .addComponentFillVertically(JPanel(), 0)
             .panel
+            
+        mainPanel = JPanel(BorderLayout())
+        mainPanel!!.add(topPanel, BorderLayout.NORTH)
         
-        return settingsPanel
+        val centerPanel = JPanel()
+        centerPanel.layout = BoxLayout(centerPanel, BoxLayout.Y_AXIS)
+        centerPanel.add(stanceForm)
+        centerPanel.add(globalForm)
+        
+        mainPanel!!.add(JBScrollPane(centerPanel), BorderLayout.CENTER)
+
+        setupListeners()
+        return mainPanel
     }
+    
+    private fun setupListeners() {
+        stanceSelector.addActionListener {
+            if (currentStanceIndex >= 0 && currentStanceIndex < localStances.size) {
+                saveFormToStance(localStances[currentStanceIndex])
+            }
+            val idx = stanceSelector.selectedIndex
+            if (idx >= 0 && idx < localStances.size) {
+                currentStanceIndex = idx
+                loadStanceToForm(localStances[idx])
+            } else {
+                currentStanceIndex = -1
+                clearForm()
+            }
+        }
+        
+        addStanceButton.addActionListener {
+            val newStance = Stance(name = "New Stance", credentialId = "key_" + UUID.randomUUID().toString().take(8))
+            localStances.add(newStance)
+            refreshSelector()
+            stanceSelector.selectedIndex = localStances.size - 1
+        }
+        
+        removeStanceButton.addActionListener {
+            val idx = stanceSelector.selectedIndex
+            if (idx >= 0) {
+                localStances.removeAt(idx)
+                refreshSelector()
+                if (localStances.isNotEmpty()) {
+                    stanceSelector.selectedIndex = (idx - 1).coerceAtLeast(0)
+                } else {
+                    clearForm()
+                    currentStanceIndex = -1
+                }
+            }
+        }
+    }
+    
+    private fun refreshSelector() {
+        val oldSelection = stanceSelector.selectedIndex
+        stanceSelector.removeAllItems()
+        for (s in localStances) {
+            stanceSelector.addItem(s.name)
+        }
+        if (oldSelection >= 0 && oldSelection < localStances.size) {
+            stanceSelector.selectedIndex = oldSelection
+        }
+    }
+    
+    private fun loadStanceToForm(s: Stance) {
+        nameField.text = s.name
+        providerComboBox.selectedItem = s.provider
+        modelField.text = s.model
+        scopeField.text = s.scope
+        credentialIdField.text = s.credentialId
+        apiKeyField.text = "" // Always clear password field on load
+        systemPromptField.text = s.systemPrompt
+    }
+    
+    private fun saveFormToStance(s: Stance) {
+        s.name = nameField.text
+        s.provider = providerComboBox.selectedItem as? String ?: "OpenAI"
+        s.model = modelField.text
+        s.scope = scopeField.text
+        s.credentialId = credentialIdField.text
+        s.systemPrompt = systemPromptField.text
+        
+        val newKey = String(apiKeyField.password)
+        if (newKey.isNotEmpty()) {
+            tempKeyUpdates[s.credentialId] = newKey
+        }
+    }
+    
+    private fun clearForm() {
+        nameField.text = ""
+        modelField.text = ""
+        scopeField.text = ""
+        credentialIdField.text = ""
+        apiKeyField.text = ""
+        systemPromptField.text = ""
+    }
+
+    // Temporary storage for key updates (CredID -> NewKey)
+    private val tempKeyUpdates = mutableMapOf<String, String>()
 
     override fun isModified(): Boolean {
         val settings = RoninSettingsState.instance
-        return String(openaiApiKeyField.password) != (CredentialHelper.getApiKey("openaiApiKey") ?: "") ||
-                String(anthropicApiKeyField.password) != (CredentialHelper.getApiKey("anthropicApiKey") ?: "") ||
-                String(googleApiKeyField.password) != (CredentialHelper.getApiKey("googleApiKey") ?: "") ||
-                String(kimiApiKeyField.password) != (CredentialHelper.getApiKey("kimiApiKey") ?: "") ||
-                String(minimaxApiKeyField.password) != (CredentialHelper.getApiKey("minimaxApiKey") ?: "") ||
-                ollamaBaseUrlField.text != settings.ollamaBaseUrl ||
-                allowedToolsField.text != settings.allowedTools ||
-                coreWorkflowField.text != settings.coreWorkflow ||
-                (providerComboBox.selectedItem as? String ?: "OpenAI") != settings.provider
+        if (currentStanceIndex >= 0 && currentStanceIndex < localStances.size) {
+            saveFormToStance(localStances[currentStanceIndex])
+        }
+        
+        if (ollamaBaseUrlField.text != settings.ollamaBaseUrl) return true
+        if (allowedToolsField.text != settings.allowedTools) return true
+        if (coreWorkflowField.text != settings.coreWorkflow) return true
+        if (localStances != settings.stances) return true
+        if (tempKeyUpdates.isNotEmpty()) return true
+        
+        return false
     }
 
     override fun apply() {
+        if (currentStanceIndex >= 0 && currentStanceIndex < localStances.size) {
+            saveFormToStance(localStances[currentStanceIndex])
+        }
+        
         val settings = RoninSettingsState.instance
-        CredentialHelper.setApiKey("openaiApiKey", String(openaiApiKeyField.password))
-        CredentialHelper.setApiKey("anthropicApiKey", String(anthropicApiKeyField.password))
-        CredentialHelper.setApiKey("googleApiKey", String(googleApiKeyField.password))
-        CredentialHelper.setApiKey("kimiApiKey", String(kimiApiKeyField.password))
-        CredentialHelper.setApiKey("minimaxApiKey", String(minimaxApiKeyField.password))
         settings.ollamaBaseUrl = ollamaBaseUrlField.text
         settings.allowedTools = allowedToolsField.text
         settings.coreWorkflow = coreWorkflowField.text
-        settings.provider = providerComboBox.selectedItem as? String ?: "OpenAI"
+        
+        // Reset Logic: If active stance is deleted, default to first available
+        settings.stances.clear()
+        settings.stances.addAll(localStances)
+        
+        if (settings.stances.none { it.name == settings.activeStance } && settings.stances.isNotEmpty()) {
+            settings.activeStance = settings.stances[0].name
+        }
+        
+        // Apply Key Updates
+        for ((id, key) in tempKeyUpdates) {
+             CredentialHelper.setApiKey(id, key)
+        }
+        tempKeyUpdates.clear()
+        
         val messageBus = com.intellij.openapi.application.ApplicationManager.getApplication().messageBus
         messageBus.syncPublisher(RoninSettingsNotifier.TOPIC).settingsChanged(settings)
     }
 
     override fun reset() {
         val settings = RoninSettingsState.instance
-        openaiApiKeyField.text = CredentialHelper.getApiKey("openaiApiKey") ?: ""
-        anthropicApiKeyField.text = CredentialHelper.getApiKey("anthropicApiKey") ?: ""
-        googleApiKeyField.text = CredentialHelper.getApiKey("googleApiKey") ?: ""
-        kimiApiKeyField.text = CredentialHelper.getApiKey("kimiApiKey") ?: ""
-        minimaxApiKeyField.text = CredentialHelper.getApiKey("minimaxApiKey") ?: ""
         ollamaBaseUrlField.text = settings.ollamaBaseUrl
         allowedToolsField.text = settings.allowedTools
         coreWorkflowField.text = settings.coreWorkflow
-        providerComboBox.selectedItem = settings.provider
+        
+        localStances.clear()
+        for (s in settings.stances) {
+            localStances.add(s.copy())
+        }
+        
+        tempKeyUpdates.clear()
+        refreshSelector()
+        
+        // Try to select active stance
+        val activeIdx = localStances.indexOfFirst { it.name == settings.activeStance }
+        if (activeIdx >= 0) {
+            currentStanceIndex = activeIdx
+            stanceSelector.selectedIndex = activeIdx
+        } else if (localStances.isNotEmpty()) {
+            currentStanceIndex = 0
+            stanceSelector.selectedIndex = 0
+        }
     }
 
     override fun disposeUIResources() {
-        settingsPanel = null
+        mainPanel = null
     }
 }

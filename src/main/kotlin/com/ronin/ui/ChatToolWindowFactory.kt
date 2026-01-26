@@ -83,7 +83,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
             val connection = ApplicationManager.getApplication().messageBus.connect(project)
             connection.subscribe(com.ronin.settings.RoninSettingsNotifier.TOPIC, object : com.ronin.settings.RoninSettingsNotifier {
                 override fun settingsChanged(settings: com.ronin.settings.RoninSettingsState) {
-                    updateModelList()
+                    updateStanceList()
                 }
             })
             
@@ -174,12 +174,12 @@ class ChatToolWindowFactory : ToolWindowFactory {
             bottomPanel.add(inputArea, BorderLayout.CENTER)
             mainPanel.add(bottomPanel, BorderLayout.SOUTH)
 
-            updateModelList()
+            updateStanceList()
             
             modelComboBox.addActionListener {
                 val selected = modelComboBox.selectedItem as? String
                 if (selected != null) {
-                    com.ronin.settings.RoninSettingsState.instance.model = selected
+                    com.ronin.settings.RoninSettingsState.instance.activeStance = selected
                 }
             }
             
@@ -230,41 +230,20 @@ class ChatToolWindowFactory : ToolWindowFactory {
             }
         }
         
-        fun updateModelList() {
+        fun updateStanceList() {
             val settings = com.ronin.settings.RoninSettingsState.instance
-            val provider = settings.provider
-            val currentModel = settings.model
+            val stances = settings.stances.map { it.name }.toTypedArray()
+            val currentStance = settings.activeStance
             
-            val initialModels = arrayOf(currentModel.ifBlank { "Loading..." })
-            modelComboBox.model = DefaultComboBoxModel(initialModels)
-            modelComboBox.isEnabled = false
-            
-            val llmService = project.service<LLMService>()
-            
-            ApplicationManager.getApplication().executeOnPooledThread {
-                val modelsList = if (provider == "OpenAI") {
-                    try {
-                        val fetched = llmService.fetchAvailableModels(provider)
-                        if (fetched.isNotEmpty()) fetched else llmService.getAvailableModels(provider)
-                    } catch (e: Exception) {
-                        llmService.getAvailableModels(provider)
-                    }
-                } else {
-                    llmService.getAvailableModels(provider)
-                }
+            SwingUtilities.invokeLater {
+                modelComboBox.model = DefaultComboBoxModel(stances)
+                modelComboBox.isEnabled = true
                 
-                SwingUtilities.invokeLater {
-                    val models = modelsList.toTypedArray()
-                    val model = DefaultComboBoxModel(models)
-                    modelComboBox.model = model
-                    modelComboBox.isEnabled = true
-                    
-                    if (models.contains(currentModel)) {
-                        modelComboBox.selectedItem = currentModel
-                    } else if (models.isNotEmpty()) {
-                        modelComboBox.selectedItem = models[0]
-                        com.ronin.settings.RoninSettingsState.instance.model = models[0]
-                    }
+                if (stances.contains(currentStance)) {
+                    modelComboBox.selectedItem = currentStance
+                } else if (stances.isNotEmpty()) {
+                    modelComboBox.selectedItem = stances[0]
+                    settings.activeStance = stances[0]
                 }
             }
         }
@@ -607,7 +586,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
         private fun attachImage() { appendMessage("System", "[Image attached]") }
 
         fun getContent(): JComponent {
-            updateModelList() 
+            updateStanceList() 
             return mainPanel
         }
     }

@@ -138,6 +138,15 @@ tasks {
     publishPlugin {
         dependsOn(patchChangelog)
     }
+
+    named("processResources", ProcessResources::class) {
+        val stancesPath = project.findProperty("stances") as? String
+        if (!stancesPath.isNullOrBlank()) {
+            from(stancesPath) {
+                rename { "default_stances.json" }
+            }
+        }
+    }
 }
 
 intellijPlatformTesting {
