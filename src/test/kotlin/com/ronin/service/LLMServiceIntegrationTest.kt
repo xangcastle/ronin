@@ -60,60 +60,45 @@ class LLMServiceIntegrationTest : BasePlatformTestCase() {
     private fun runTestForModel(modelName: String) {
         println("Testing Model: $modelName")
         
-        // 1. Setup Settings Mock
-        val mockSettings = Mockito.mock(RoninSettingsState::class.java)
-        Mockito.`when`(mockSettings.provider).thenReturn("OpenAI")
-        Mockito.`when`(mockSettings.model).thenReturn(modelName)
-        
-        // 2. We need to inject these settings into LLMService. 
-        // LLMService calls RoninSettingsState.instance. 
-        // We can try to set the static instance if it's mutable?
-        // RoninSettingsState seems to be a service.
-        // ApplicationManager.getApplication().replaceService?
-        
-        // Let's try to bypass the service structure and use reflection to invoke `sendOpenAIRequest`
-        // but passing our OWN settings object/key logic if possible?
-        // No, `sendOpenAIRequest` is private.
-        
-        // Real logic: We will assume we added the Env Var Fallback to LLMService.kt
-        
-        // Service creation
-        val service = LLMServiceImpl(project)
-        
-        // We need to Force the Model.
-        // Since we can't mock the static RoninSettingsState.instance easily without registering a service in the test container:
-        // plugin.xml declares it as applicationService.
-        // We can replace it.
-        
-        /*
-        val application = com.intellij.openapi.application.ApplicationManager.getApplication()
-        application.replaceService(RoninSettingsState::class.java, mockSettings, testRootDisposable)
-        */
-        // But RoninSettingsState.instance is a static property that calls getService.
-        // Replacing the service should work.
-        
-        // However, checking if RoninSettingsState is an interface or class. If class, check if open.
-        // If final class, Mockito won't mock it unless inline-mock-maker is on.
-        
-        // Simpler Path:
-        // Use a custom version of `LLMServiceImpl` that overrides `sendMessage` to use a local settings object?
-        
-        // Let's rely on the user having `OPENAI_API_KEY` set and us Modifying LLMService.kt to use it.
-        // And we will set the global settings object real fields if possible.
+        // 1. Get the Settings Instance
+        // We rely on the real service instance for integration tests
         val settings = RoninSettingsState.instance
-        val originalModel = settings.model
-        try {
-            settings.model = modelName
+        
+        // 2. Select a Stance to modify (e.g., "The Daimyo" which is OpenAI)
+        val stanceName = "The Daimyo"
+        val stance = settings.stances.find { it.name == stanceName }
+            ?: throw IllegalStateException("Default stance '$stanceName' not found for testing.")
             
-            // Execute
+        // 3. Backup original state
+        val originalModel = stance.model
+        val originalActive = settings.activeStance
+        
+        try {
+            // 4. Configure Stance for Test
+            stance.model = modelName
+            settings.activeStance = stanceName
+            
+            // Ensure Credential is set (Integration test assumes Env Var or Keychain is ready)
+            // But since we are in Strict Mode, we MUST ensure the credentialID resolves.
+            // If realApiKey is set (from setUp), we should inject it into PasswordSafe for the test?
+            // Or just assume the user has "openai_main" set up? 
+            // The test checks `if (realApiKey.isNullOrBlank()) return`, so we have an Env Var.
+            // We should Set the API Key for the stance's credentialId to this Env Var value to ensure it passes Strict Mode.
+            com.ronin.settings.CredentialHelper.setApiKey(stance.credentialId, realApiKey)
+            
+            // 5. Service creation & Execution
+            val service = LLMServiceImpl(project)
             val response = service.sendMessage("Say 'Test'", history = emptyList())
+            
             println("Response from $modelName: $response")
             
-            assertFalse("Response should not be an error", response.startsWith("Error:"))
+            assertFalse("Response should not be an error: $response", response.startsWith("Error:"))
             assertTrue("Response should contain text", response.isNotBlank())
             
         } finally {
-            settings.model = originalModel
+            // Restore state
+            stance.model = originalModel
+            settings.activeStance = originalActive
         }
     }
 }

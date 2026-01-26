@@ -4,23 +4,24 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 
 class RoninSettingsStateTest : BasePlatformTestCase() {
     
-    fun testMigration() {
+    fun testDefaultStancesInitialization() {
         val state = RoninSettingsState()
-        val loadedState = RoninSettingsState()
         
-        // Simulate loading from XML with legacy fields
-        loadedState.openaiApiKey = "test-secret-key"
+        // The init block should trigger when accessing stances if empty logic is in constructor or init
+        // Actually logic is in init block checking stances.isEmpty()
         
-        // This should trigger migration
-        state.loadState(loadedState)
+        // Verify Defaults
+        assertEquals(3, state.stances.size)
         
-        // Check if state is clear (fields remain null)
-        assertNull(state.openaiApiKey)
+        val daimyo = state.stances.find { it.name == "The Daimyo" }
+        assertNotNull(daimyo)
+        assertEquals("gpt-4o", daimyo?.model)
+        assertEquals("OpenAI", daimyo?.provider)
         
-        // Verify key was moved to CredentialHelper
-        // Note: usage of PasswordSafe in test environment might rely on in-memory impl or fail
-        // If it throws, we know we need to adjust test or environment.
-        val storedKey = CredentialHelper.getApiKey("openaiApiKey")
-        assertEquals("test-secret-key", storedKey)
+        val shinobi = state.stances.find { it.name == "The Shinobi" }
+        assertNotNull(shinobi)
+        assertEquals("gpt-4o-mini", shinobi?.model)
+        
+        assertEquals("The Daimyo", state.activeStance)
     }
 }

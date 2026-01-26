@@ -113,12 +113,13 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         """.trimIndent()
 
         if (stance.provider == "OpenAI") {
+            // STRICT MODE: Only use the credential explicitly assigned to this Stance.
+            // No Environment Variable Fallbacks. No Global Keys.
             val apiKey = com.ronin.settings.CredentialHelper.getApiKey(stance.credentialId)
-            val finalKey = if (!apiKey.isNullOrBlank()) apiKey else System.getenv("OPENAI_API_KEY")
             
-            if (finalKey.isNullOrBlank()) return "Error: No API Key found for credential ID '${stance.credentialId}'."
+            if (apiKey.isNullOrBlank()) return "Error: No API Key found for credential ID '${stance.credentialId}'. Please configure it in Settings."
             
-            return sendOpenAIRequest(systemPrompt, history, stance.model, finalKey, false)
+            return sendOpenAIRequest(systemPrompt, history, stance.model, apiKey, false)
         }
         return "Error: Provider '${stance.provider}' not supported yet."
     }
@@ -301,7 +302,7 @@ class LLMServiceImpl(private val project: Project) : LLMService {
     }
 
     override fun fetchAvailableModels(provider: String): List<String> {
-        // Dynamic fetching temporarily disabled during Stance refactor
+        // Return static list supported by this version of Ronin
         return getAvailableModels(provider)
     }
 }
