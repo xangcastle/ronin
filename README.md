@@ -62,48 +62,36 @@ The codebase is organized into clear functional components:
     *   **`RoninConfigService`**: Manages project context, rules, and structure.
     *   **`EditService`**: Safely modifies files in the editor using the IntelliJ SDK.
 
-## 🧠 Agentic Architecture: The 2-Phase Loop
+## 🧠 Agentic Architecture: The Thought-Action Protocol
 
-Ronin has evolved from a simple chatbot into a **2-Phase Agent** that thinks before it acts.
+Ronin operates as a continuous **Agentic Loop** that thinks before it acts. It eliminates the friction of manual approval steps, prioritizing speed and autonomy ("Vibe Coding").
 
-### Phase 1: Planning (Architect)
-When you send a request, Ronin first acts as a Senior Architect. It analyzes your request and the codebase to generate a **Plain Text Implementation Plan**.
-- **Goal**: Create a step-by-step guide.
-- **Output**: A clear plan presented to the user.
-- **Action**: You must read the plan and type "Proceed" (or ask for changes).
+### The Loop
+Every time you send a request, Ronin enters a strict **Thought-Action Cycle**:
 
-### Phase 2: Execution (Builder / Vibe Coding)
-Once a plan is active, Ronin switches to "Builder Mode". It executes the plan step-by-step using a strict **Thought-Action Protocol (XML)**.
-
-- **Thinking (`<analysis>`)**: The agent reflects on the task, analyzes the file, and plans the specific edit.
-- **Action (`<execute>`)**: The agent performs a single, atomic action (e.g., `write_code`, `run_command`).
-- **Loop**: `Analyze` -> `Execute` -> `Verify` -> `Next`.
+1.  **Thinking (`<analysis>`)**: The agent reflects on the task, analyzes the file, and plans specific edits.
+2.  **Action (`<execute>`)**: The agent performs a single, atomic action (e.g., `write_code`, `run_command`).
+3.  **Observation**: The tool output (e.g., compiler error, specific file content) is fed back into the context.
+4.  **Loop**: `Analyze` -> `Execute` -> `Verify` -> `Next`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    
-    Idle --> Planning : User Request
-    
-    state Planning {
-        [*] --> Analyzing
-        Analyzing --> PlanProposal : Generate Plan
-        PlanProposal --> Analyzing : User Feedback
-        PlanProposal --> Execution : User Approves ("Proceed")
-    }
-    
-    state Execution {
+
+    Idle --> Thinking : User Request
+
+    state ExecutionLoop {
         [*] --> Thinking
         Thinking --> ToolExecution : XML <execute>
         ToolExecution --> ResultAnalysis : Feedback (stdout/success)
         ResultAnalysis --> Thinking : Next Step
-        ResultAnalysis --> Finished : "task_complete"
     }
-    
+
+    ResultAnalysis --> Finished : "task_complete"
     Finished --> Idle : Done
 ```
 
-### The Execution Loop (Detailed)
+### The Execution Flow
 
 ```mermaid
 sequenceDiagram
@@ -115,14 +103,9 @@ sequenceDiagram
     participant Tools as Edit/Terminal
 
     User->>UI: "Refactor this class"
-    UI->>LLM: Mode: PLANNING
-    LLM-->>UI: "Here is the plan: 1. Rename..."
-    
-    User->>UI: "Proceed"
-    UI->>Agent: Plan Locked
+    UI->>LLM: Mode: EXECUTION (History + Context)
     
     loop Execution Cycle
-        UI->>LLM: Mode: EXECUTION (History + Current Plan)
         LLM-->>UI: XML Response (<analysis>...</analysis><execute>...</execute>)
         
         UI->>Parser: Parse XML (Extract Thought & Action)
@@ -138,7 +121,6 @@ sequenceDiagram
     end
     
     LLM-->>UI: XML Action <task_complete>
-    UI->>Agent: Clear Plan
     UI-->>User: "Task Finished"
 ```
 
