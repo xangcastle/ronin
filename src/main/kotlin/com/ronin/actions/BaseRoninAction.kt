@@ -30,14 +30,10 @@ abstract class BaseRoninAction : AnAction() {
 
         val prompt = getPrompt(selectedText)
 
-        // 1. Open the Tool Window if not open
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Ronin Chat")
         toolWindow?.show {
-            // 2. Get ChatToolWindow instance and send message
             val chatWindow = ChatToolWindow.getInstance(project)
             if (chatWindow != null) {
-                // Use the new API to send the message
-                // This will handle everything: adding to UI, calling LLM, processing response, etc.
                 chatWindow.sendMessageProgrammatically(prompt)
             }
         }

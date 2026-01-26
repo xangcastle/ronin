@@ -151,7 +151,6 @@ class RoninApi(private val project: Project) {
             }
             is CommandResult.PromptInjection -> {
                 onResponse("System", "🔄 Loaded command context...")
-                // The UI should handle re-sending with the injected prompt
                 onComplete()
             }
         }
