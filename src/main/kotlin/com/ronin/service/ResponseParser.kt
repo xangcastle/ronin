@@ -141,7 +141,7 @@ object ResponseParser {
                          val output = "**Edit Applied to `$path`**: $resultStr\n**Validation**: $validationMsg"
                          ParseResult("Editing $path...", scratchpad = scratchpad, requiresFollowUp = true, toolOutput = output)
                     } else {
-                        ParseResult("Error: Missing 'path' or 'content' for write_code", scratchpad = scratchpad, requiresFollowUp = true)
+                        ParseResult("Error: Missing 'path' or 'content' for write_code. \nreceived args: ${args.keys}\nraw body: ```\n$commandBody\n```", scratchpad = scratchpad, requiresFollowUp = true)
                     }
                 }
                 "run_command" -> {
@@ -162,13 +162,26 @@ object ResponseParser {
     private fun parseArguments(xmlBody: String): Map<String, String> {
         val args = mutableMapOf<String, String>()
         
-        // Match <arg name="...">value</arg>
+        // Strategy 1: Match Standard <arg name="...">value</arg>
         val argRegex = "<arg\\s+name=\"([^\"]+)\">([\\s\\S]*?)</arg>".toRegex()
         argRegex.findAll(xmlBody).forEach { match ->
             args[match.groupValues[1]] = match.groupValues[2].trim()
         }
         
-        // Match <content>...</content> (Special case for large code blocks)
+        // Strategy 2: Fallback - Match direct tags <key>value</key> (Common AI hallucination)
+        // Only run if we didn't find standard args or if we want to be permissive
+        if (args.isEmpty()) {
+            val tagRegex = "<([a-zA-Z0-9_]+)>([\\s\\S]*?)</\\1>".toRegex()
+            tagRegex.findAll(xmlBody).forEach { match ->
+                val key = match.groupValues[1]
+                // filtering out potential HTML/XML collisions if needed, but for now accept all
+                if (key != "content" && key != "command") { // content is handled specially below
+                     args[key] = match.groupValues[2].trim()
+                }
+            }
+        }
+        
+        // Strategy 3: Special <content> tag (always valid)
         val contentRegex = "<content>([\\s\\S]*?)</content>".toRegex()
         val contentMatch = contentRegex.find(xmlBody)
         if (contentMatch != null) {
