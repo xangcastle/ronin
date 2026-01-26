@@ -8,6 +8,7 @@ import java.util.concurrent.Future
 
 /**
  * Executes LLM tasks asynchronously with callbacks for different stages
+ * All callbacks are executed on the EDT to ensure thread safety
  */
 class TaskExecutor(private val project: Project) {
     
@@ -15,12 +16,12 @@ class TaskExecutor(private val project: Project) {
      * Executes an LLM task asynchronously
      * 
      * @param task The LLM task to execute
-     * @param onThinking Callback when the LLM is "thinking" (scratchpad content)
-     * @param onResponse Callback when the main response is received
-     * @param onCommand Callback when a command needs to be executed
-     * @param onFollowUp Callback when a follow-up is required (prompt, summary)
-     * @param onError Callback when an error occurs
-     * @param onComplete Callback when execution is complete (success or failure)
+     * @param onThinking Callback when the LLM is "thinking" (scratchpad content) - RUNS ON EDT
+     * @param onResponse Callback when the main response is received - RUNS ON EDT
+     * @param onCommand Callback when a command needs to be executed - RUNS ON EDT
+     * @param onFollowUp Callback when a follow-up is required (prompt, summary) - RUNS ON EDT
+     * @param onError Callback when an error occurs - RUNS ON EDT
+     * @param onComplete Callback when execution is complete (success or failure) - RUNS ON EDT
      * @return Future that can be used to cancel the task
      */
     fun executeTask(
@@ -50,43 +51,54 @@ class TaskExecutor(private val project: Project) {
                 if (Thread.interrupted()) {
                     throw InterruptedException()
                 }
-                
-                // Parse response
+
                 val llmResponse = messageHandler.parseResponse(response)
-                
-                // Handle scratchpad/thinking
-                if (!llmResponse.scratchpad.isNullOrBlank()) {
-                    onThinking(llmResponse.scratchpad)
-                }
-                
-                // Handle main response
+
                 val displayText = if (llmResponse.toolOutput != null) {
                     "${llmResponse.text}\n\n${llmResponse.toolOutput}"
                 } else {
                     llmResponse.text
                 }
-                onResponse(displayText)
-                
-                // Handle follow-up actions
+
+                if (!llmResponse.scratchpad.isNullOrBlank()) {
+                    runOnEdt {
+                        onThinking(llmResponse.scratchpad)
+                    }
+                }
+
+                runOnEdt {
+                    onResponse(displayText)
+                }
+
                 when {
                     llmResponse.commandToRun != null -> {
-                        onCommand(llmResponse.commandToRun)
+                        runOnEdt {
+                            onCommand(llmResponse.commandToRun)
+                        }
                     }
                     llmResponse.requiresFollowUp -> {
                         val followUpPrompt = "The action was completed. Here is the output:\n```\n${llmResponse.toolOutput ?: llmResponse.text}\n```\nAnalyze this and continue."
                         val followUpSummary = "File action complete."
-                        onFollowUp(followUpPrompt, followUpSummary)
+                        runOnEdt {
+                            onFollowUp(followUpPrompt, followUpSummary)
+                        }
                     }
                     else -> {
-                        onComplete()
+                        runOnEdt {
+                            onComplete()
+                        }
                     }
                 }
                 
             } catch (e: InterruptedException) {
-                onComplete()
+                runOnEdt { 
+                    onComplete() 
+                }
             } catch (e: Exception) {
-                onError(e.message ?: "Unknown error")
-                onComplete()
+                runOnEdt {
+                    onError(e.message ?: "Unknown error")
+                    onComplete()
+                }
             }
         }
     }
@@ -97,4 +109,13 @@ class TaskExecutor(private val project: Project) {
     fun cancelTask(future: Future<*>?) {
         future?.cancel(true)
     }
+
+    /**
+     * Executes an action on the EDT (Event Dispatch Thread)
+     * This is required for any UI updates in IntelliJ Platform
+     */
+    private fun runOnEdt(action: () -> Unit) {
+        ApplicationManager.getApplication().invokeLater(action)
+    }
+
 }

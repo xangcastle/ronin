@@ -6,7 +6,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.UIUtil
 import com.ronin.MyBundle
-import com.ronin.service.LLMService
 import com.ronin.service.TerminalService
 import com.ronin.settings.RoninSettingsNotifier
 import com.ronin.settings.RoninSettingsState
@@ -79,7 +78,7 @@ class ChatToolWindow(private val project: Project) {
             onActionButtonClick = { handleActionButtonClick() },
             onAttachClick = { handleAttachImage() },
             onModelChange = { model -> 
-                RoninSettingsState.instance.model = model
+                RoninSettingsState.instance.activeStance = model
             }
         )
         bottomPanel.add(controlBar, BorderLayout.NORTH)
@@ -147,6 +146,7 @@ class ChatToolWindow(private val project: Project) {
             },
             onError = { error ->
                 addSystemMessage("❌ Error: $error")
+                setGenerating(false)
             },
             onComplete = {
                 setGenerating(false)
@@ -180,6 +180,7 @@ class ChatToolWindow(private val project: Project) {
             },
             onError = { error ->
                 addSystemMessage("❌ Error: $error")
+                setGenerating(false)
             },
             onComplete = {
                 setGenerating(false)
@@ -274,32 +275,21 @@ class ChatToolWindow(private val project: Project) {
     }
     
     /**
-     * Updates the model list
+     * Updates the stance list (replaced old model list)
      */
     fun updateModelList() {
         val settings = RoninSettingsState.instance
-        val provider = settings.provider
-        val currentModel = settings.activeStance
+        val currentStance = settings.activeStance
         
         controlBar.setModelsLoading(true)
         
-        val llmService = project.service<LLMService>()
-        
         ApplicationManager.getApplication().executeOnPooledThread {
-            val modelsList = if (provider == "OpenAI") {
-                try {
-                    val fetched = llmService.fetchAvailableModels(provider)
-                    fetched.ifEmpty { llmService.getAvailableModels(provider) }
-                } catch (_: Exception) {
-                    llmService.getAvailableModels(provider)
-                }
-            } else {
-                llmService.getAvailableModels(provider)
-            }
+            // Get all available stances
+            val stanceNames = settings.stances.map { it.name }
             
             SwingUtilities.invokeLater {
-                val models = modelsList.toTypedArray()
-                controlBar.updateModels(models, currentModel)
+                val stances = stanceNames.toTypedArray()
+                controlBar.updateModels(stances, currentStance)
                 controlBar.setModelsLoading(false)
             }
         }
