@@ -2,7 +2,10 @@ package com.ronin.ui.chat.components
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
+import java.awt.GridBagConstraints
+import java.awt.GridBagLayout
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
@@ -17,7 +20,7 @@ class ControlBar(
     private val onActionButtonClick: () -> Unit,
     private val onAttachClick: () -> Unit,
     private val onModelChange: (String) -> Unit
-) : JPanel(BorderLayout()) {
+) : JPanel(GridBagLayout()) {
     
     val modelComboBox = ComboBox<String>()
     private val actionButton = JButton(AllIcons.Actions.Refresh)
@@ -26,7 +29,7 @@ class ControlBar(
     private var isGenerating = false
     
     init {
-        border = BorderFactory.createEmptyBorder(0, 0, 5, 0)
+        border = JBUI.Borders.emptyBottom(5)
         createControls()
     }
     
@@ -38,26 +41,36 @@ class ControlBar(
                 onModelChange(selected)
             }
         }
-        
-        val leftControls = JPanel()
-        leftControls.layout = BoxLayout(leftControls, BoxLayout.X_AXIS)
-        leftControls.add(modelComboBox)
-        add(leftControls, BorderLayout.WEST)
-        
+        val gbc = GridBagConstraints()
+
+        gbc.gridx = 0
+        gbc.gridy = 0
+        gbc.weightx = 1.0
+        gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.anchor = GridBagConstraints.WEST
+        add(modelComboBox, gbc)
+
         val rightControls = JPanel()
         rightControls.layout = BoxLayout(rightControls, BoxLayout.X_AXIS)
-        
+
         actionButton.toolTipText = "Reset Chat"
         actionButton.addActionListener { onActionButtonClick() }
-        
+
         attachButton.toolTipText = "Attach Image"
         attachButton.addActionListener { onAttachClick() }
-        
+
         rightControls.add(actionButton)
         rightControls.add(Box.createHorizontalStrut(5))
         rightControls.add(attachButton)
-        
-        add(rightControls, BorderLayout.EAST)
+
+        gbc.gridx = 1
+        gbc.gridy = 0
+        gbc.weightx = 0.0
+        gbc.fill = GridBagConstraints.NONE
+        gbc.anchor = GridBagConstraints.EAST
+        gbc.insets = JBUI.insetsLeft(10)
+
+        add(rightControls, gbc)
     }
     
     /**

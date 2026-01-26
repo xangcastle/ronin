@@ -40,8 +40,7 @@ class TaskExecutor(private val project: Project) {
                 if (Thread.interrupted()) {
                     throw InterruptedException()
                 }
-                
-                // Send message to LLM
+
                 val response = llmService.sendMessage(
                     task.message,
                     task.context,

@@ -46,7 +46,7 @@ class ChatToolWindow(private val project: Project) {
             val toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
                 .getToolWindow("Ronin Chat") ?: return null
             val content = toolWindow.contentManager.contents.firstOrNull() ?: return null
-            val component = content.component as? JComponent ?: return null
+            val component = content.component
             return component.getClientProperty(KEY) as? ChatToolWindow
         }
     }
@@ -91,8 +91,7 @@ class ChatToolWindow(private val project: Project) {
         bottomPanel.add(inputField, BorderLayout.CENTER)
         
         mainPanel.add(bottomPanel, BorderLayout.SOUTH)
-        
-        // Load models
+
         updateModelList()
     }
     
@@ -290,8 +289,8 @@ class ChatToolWindow(private val project: Project) {
             val modelsList = if (provider == "OpenAI") {
                 try {
                     val fetched = llmService.fetchAvailableModels(provider)
-                    if (fetched.isNotEmpty()) fetched else llmService.getAvailableModels(provider)
-                } catch (e: Exception) {
+                    fetched.ifEmpty { llmService.getAvailableModels(provider) }
+                } catch (_: Exception) {
                     llmService.getAvailableModels(provider)
                 }
             } else {

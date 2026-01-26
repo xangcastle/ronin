@@ -1,82 +1,103 @@
 package com.ronin.ui.chat.components
 
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CustomShortcutSet
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
-import com.intellij.openapi.fileTypes.PlainTextFileType
+import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.ui.EditorTextField
-import java.awt.event.KeyAdapter
+import com.intellij.ui.JBColor
+import com.intellij.util.ui.JBUI
+import java.awt.Dimension
 import java.awt.event.KeyEvent
-import javax.swing.BorderFactory
+import javax.swing.KeyStroke
+import javax.swing.ScrollPaneConstants
+import javax.swing.SwingUtilities
 
-/**
- * Improved chat input field using EditorTextField for better text handling
- */
 class ChatInputField(
-    private val project: Project,
+    project: Project,
     private val onSendMessage: (String) -> Unit
-) : EditorTextField(project, PlainTextFileType.INSTANCE) {
-    
+) : EditorTextField(project, com.intellij.openapi.fileTypes.PlainTextFileType.INSTANCE) {
+
+    private val MAX_VISIBLE_LINES = 15
+    private val MIN_HEIGHT = 100
+
     init {
         setOneLineMode(false)
-        setPlaceholder("Type your message... (Enter to send, Shift+Enter for new line)")
-        
-        border = BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(java.awt.Color.GRAY),
-            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        setPlaceholder("Type a message... (Enter to send, Shift+Enter for newline)")
+
+        border = JBUI.Borders.compound(
+            JBUI.Borders.customLine(JBColor.border(), 1),
+            JBUI.Borders.empty(4)
         )
-        
-        // Handle Enter key for sending
-        addKeyListener()
-        
-        // Auto-adjust height based on content
-        addDocumentListener()
-    }
-    
-    private fun addKeyListener() {
+
         addSettingsProvider { editor ->
-            editor.contentComponent.addKeyListener(object : KeyAdapter() {
-                override fun keyPressed(e: KeyEvent) {
-                    if (e.keyCode == KeyEvent.VK_ENTER) {
-                        if (!e.isShiftDown) {
-                            e.consume()
-                            sendMessage()
-                        }
-                    }
-                }
-            })
+            editor.settings.apply {
+                isUseSoftWraps = true
+                isLineNumbersShown = false
+                isFoldingOutlineShown = false
+                isRightMarginShown = false
+                isVirtualSpace = false
+                isAdditionalPageAtBottom = false
+            }
+            editor.scrollPane.verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+            editor.scrollPane.border = JBUI.Borders.empty()
+            editor.backgroundColor = JBColor.namedColor("Editor.background", JBColor.WHITE)
         }
-    }
-    
-    private fun addDocumentListener() {
+
         addDocumentListener(object : DocumentListener {
             override fun documentChanged(event: DocumentEvent) {
-                // Update preferred height based on line count
-                val lineCount = document.lineCount.coerceIn(1, 10)
-                preferredSize = java.awt.Dimension(
-                    preferredSize.width,
-                    lineCount * 20 + 10 // Approximate line height
-                )
-                revalidate()
+                SwingUtilities.invokeLater {
+                    revalidate()
+                    repaint()
+                }
             }
         })
+
+        val sendAction = object : DumbAwareAction() {
+            override fun actionPerformed(e: AnActionEvent) {
+                sendMessage()
+            }
+        }
+        sendAction.registerCustomShortcutSet(
+            CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0)),
+            this
+        )
     }
-    
+
+    /**
+     * SOLUCIÓN TÉCNICA:
+     * Sobrescribimos getPreferredSize. Esta es la fuente de la verdad para los Layout Managers.
+     * Cada vez que Swing recalcula el layout (llamado por revalidate), entra aquí.
+     */
+    override fun getPreferredSize(): Dimension {
+        val d = super.getPreferredSize()
+
+        val editor = this.editor ?: return d
+
+        val lineHeight = editor.lineHeight
+        val lineCount = document.lineCount.coerceAtLeast(1)
+
+        val linesToShow = lineCount.coerceAtMost(MAX_VISIBLE_LINES)
+
+        val insets = insets
+        val contentHeight = (linesToShow * lineHeight) + insets.top + insets.bottom + 4
+
+        return Dimension(d.width, contentHeight.coerceAtLeast(MIN_HEIGHT))
+    }
+
     private fun sendMessage() {
         val message = text.trim()
         if (message.isNotBlank()) {
             onSendMessage(message)
-            text = ""
-        }
-    }
-    
-    /**
-     * Enables or disables the input field
-     */
-    override fun setEnabled(enabled: Boolean) {
-        isEnabled = enabled
-        if (enabled) {
-            requestFocusInWindow()
+            ApplicationManager.getApplication().invokeLater {
+                text = ""
+                // Forzar revalidación al limpiar para volver al tamaño mínimo
+                revalidate()
+                repaint()
+            }
         }
     }
 }
