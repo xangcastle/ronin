@@ -52,6 +52,11 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             2. **NO OPEN LOOPS**: If you are just replying to the user (no code action), you MUST use `task_complete` with your message as `content`.
             3. **ANTI-STALLING**: Do NOT stop at `<analysis>`. If you stop, the system hangs. You must proceed to `<execute>`.
             4. **AUTOMATION FAILURE**: If you output only analysis, the automation fails.
+            5. **EXECUTION AUTHORITY**: If the user asks to "run the app" or "start the server", you MUST use the `run_command` tool with the configured **Execution Command** below.
+            6. **NO HALLUCINATIONS**: Do NOT invent new command names like "run_application". Only use the commands listed below.
+            
+            **CONFIGURATION:**
+            - **Execution Command** (Use with `run_command`): `${stance.executionCommand}`
             
             **AVAILABLE COMMANDS:**
             
@@ -251,17 +256,18 @@ class LLMServiceImpl(private val project: Project) : LLMService {
     
     internal fun parseModelsJson(json: String): List<String> {
         return try {
-            val tempMap = com.google.gson.Gson().fromJson(json, Map::class.java) as Map<String, Any>
-            val data = tempMap["data"] as? List<Map<String, Any>> ?: emptyList()
+            val tempMap = com.google.gson.Gson().fromJson(json, Map::class.java) as Map<*, *>
+            val data = tempMap["data"] as? List<*> ?: emptyList<Any>()
             
             val models = mutableListOf<String>()
             
-            for (modelObj in data) {
+            for (modelItem in data) {
+                val modelObj = modelItem as? Map<*, *> ?: continue
                 val id = modelObj["id"] as? String ?: continue
                 
-                val capabilities = (modelObj["capabilities"] as? Map<String, Any>) 
-                    ?: (modelObj["features"] as? List<String>)?.associate { it to true } 
-                    ?: emptyMap()
+                val capabilities = (modelObj["capabilities"] as? Map<*, *>) 
+                    ?: (modelObj["features"] as? List<*>)?.associate { it.toString() to true } 
+                    ?: emptyMap<Any, Any>()
                     
                 val isChatExplicit = capabilities.keys.any { k -> k.toString().contains("chat") }
                 val isCompletionOnly = capabilities.keys.any { k -> (k.toString() == "completion" || k.toString().contains("text-completion")) } && !isChatExplicit
