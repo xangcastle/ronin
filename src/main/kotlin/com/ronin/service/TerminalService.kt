@@ -11,14 +11,29 @@ class TerminalService(private val project: Project) {
     fun runCommand(command: String, onOutput: (String) -> Unit = {}): String {
         val basePath = project.basePath ?: return "Error: No project base path found."
         
-        // Detect shell
         val isWindows = System.getProperty("os.name").lowercase().contains("win")
-        val shell = if (isWindows) listOf("cmd.exe", "/c") else listOf("/bin/sh", "-c")
+        
+        val userShell = System.getenv("SHELL")
+        val shellCmd = if (isWindows) {
+             listOf("cmd.exe", "/c") 
+        } else {
+             val shell = when {
+                 !userShell.isNullOrBlank() -> userShell
+                 File("/bin/zsh").exists() -> "/bin/zsh"
+                 File("/bin/bash").exists() -> "/bin/bash"
+                 else -> "/bin/sh"
+             }
+             listOf(shell, "-i", "-l", "-c")
+        }
         
         try {
-            val processBuilder = ProcessBuilder(shell + command)
+            onOutput("Ronin Shell: Using ${shellCmd.first()} (Interactive/Login) to execute: $command\n")
+            
+            val processBuilder = ProcessBuilder(shellCmd + command)
             processBuilder.directory(File(basePath))
             processBuilder.redirectErrorStream(true) // Merge stdout and stderr
+            
+            processBuilder.environment().putAll(System.getenv())
             
             val process = processBuilder.start()
             
@@ -31,7 +46,6 @@ class TerminalService(private val project: Project) {
                 output.append(text)
             }
             
-            // Wait with timeout (increased to 60 minutes)
             val completed = process.waitFor(60, TimeUnit.MINUTES)
             if (!completed) {
                 process.destroy()
