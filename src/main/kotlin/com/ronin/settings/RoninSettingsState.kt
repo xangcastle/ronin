@@ -18,7 +18,7 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
         var description: String = "",
         var systemPrompt: String = "",
         var provider: String = "OpenAI",
-        var model: String = "4o-mini",
+        var model: String = "gpt-4o-mini",
         var scope: String = "General",
         var credentialId: String = "",
         var executionCommand: String = "bazel run //project:app.binary"
@@ -37,7 +37,6 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
     """.trimIndent()
 
     init {
-        // Initialize Default Samurai Personas if empty
         if (stances.isEmpty()) {
             val corporateProfile = RoninSettingsState::class.java.getResource("/default_stances.json")
             if (corporateProfile != null) {
@@ -63,6 +62,7 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
                 id = "shogun-architect",
                 name = "Shogun (Architect/SRE)",
                 description = "Total dominion of Cosmos. Focus on Bazel, custom rules (.bzl), and orchestration.",
+                model = "gpt-4o",
                 systemPrompt = """
                     You are the Shogun of iTstar. Your domain is the 'Cosmos' monorepo.
                     Your priority is infrastructure, build efficiency, and architecture.

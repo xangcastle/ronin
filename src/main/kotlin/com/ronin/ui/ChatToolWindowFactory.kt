@@ -283,8 +283,9 @@ class ChatToolWindowFactory : ToolWindowFactory {
         }
 
         private fun processUserMessage(text: String) {
-            val configService = project.service<com.ronin.service.RoninConfigService>()
-            val activeFile = configService.getActiveFileContent()
+            val activeFile = ReadAction.compute<String?, Throwable> {
+                 com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).selectedTextEditor?.document?.text
+            }
             
             currentTask = ApplicationManager.getApplication().executeOnPooledThread {
                 try {
@@ -297,16 +298,11 @@ class ChatToolWindowFactory : ToolWindowFactory {
                     messageHistory.add(mapOf("role" to "user", "content" to text))
                     sessionService.addMessage("user", text)
                     
-                    val projectStructure = ReadAction.compute<String, Throwable> { 
-                        configService.getProjectStructure() 
-                    }
-                    
                     if (Thread.interrupted()) throw InterruptedException()
                     val contextBuilder = StringBuilder()
                     if (activeFile != null) {
                         contextBuilder.append("Active File Content:\n```\n$activeFile\n```\n\n")
                     }
-                    contextBuilder.append(projectStructure)
                     
                     val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
                     if (Thread.interrupted()) throw InterruptedException()
@@ -510,12 +506,14 @@ class ChatToolWindowFactory : ToolWindowFactory {
             currentTask = ApplicationManager.getApplication().executeOnPooledThread {
                 try {
                     val llmService = project.service<LLMService>()
-                    val configService = project.service<com.ronin.service.RoninConfigService>()
-                    val activeFile = configService.getActiveFileContent()
-                    val projectStructure = ReadAction.compute<String, Throwable> { configService.getProjectStructure() }
+                    
+                    val activeFile = ReadAction.compute<String?, Throwable> {
+                         com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).selectedTextEditor?.document?.text
+                    }
+                    
                     val contextBuilder = StringBuilder()
                     if (activeFile != null) contextBuilder.append("Active File:\n```\n$activeFile\n```\n\n")
-                    contextBuilder.append(projectStructure)
+                    
                     val response = llmService.sendMessage(text, contextBuilder.toString(), ArrayList(messageHistory))
                     if (Thread.interrupted()) throw InterruptedException()
                     

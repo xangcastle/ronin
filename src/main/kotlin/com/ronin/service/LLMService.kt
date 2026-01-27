@@ -20,10 +20,6 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         val stance = settings.stances.find { it.name == activeStanceName } 
             ?: throw IllegalStateException("Active stance '$activeStanceName' not found in configuration.")
             
-        val configService = project.service<RoninConfigService>()
-        val projectContext = configService.getProjectStructure()
-        val projectRules = configService.getProjectRules()
-        
         val systemPrompt = """
             You are Ronin, engaging in the stance of: "${stance.name}".
             ${stance.systemPrompt}
@@ -31,10 +27,9 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             **ENVIRONMENT:**
             - You are working in a Bazel-based monorepo.
             - Scope: ${stance.scope}
-            - $projectContext
             - Allowed Tools: ${settings.allowedTools}
-            
-            ${if (!projectRules.isNullOrBlank()) "**PROJECT RULES:**\n$projectRules\n" else ""}
+            - Execution Command: ${stance.executionCommand}
+
             
             **CORE PROTOCOL (Thought-Action):**
             You must always "think" before you act. Your response must follow this strict XML format:
