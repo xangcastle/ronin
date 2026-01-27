@@ -1,12 +1,18 @@
 package com.ronin.ui.chat.api
 
 import com.intellij.openapi.application.ReadAction
-import com.intellij.openapi.components.service
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
-import com.intellij.util.concurrency.AppExecutorUtil
+import com.intellij.openapi.roots.ProjectRootManager
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiManager
 
 /**
  * Builds LLM tasks with appropriate context without the UI needing to know the details
+ * 
+ * THREADING: This class is designed to be called from background threads.
+ * The buildContext() method uses ReadAction.compute() to safely access project data.
  */
 class TaskBuilder(private val project: Project) {
     
@@ -42,22 +48,105 @@ class TaskBuilder(private val project: Project) {
     
     /**
      * Builds the context string including active file and project structure
+     * 
+     * THREADING: Uses ReadAction.compute() to safely access file content and project structure
+     * from a background thread. This is called from executeOnPooledThread in TaskExecutor.
      */
     private fun buildContext(): String {
-        val configService = project.service<com.ronin.service.RoninConfigService>()
+        return ReadAction.compute<String, Throwable> {
+            val contextBuilder = StringBuilder()
 
-        val activeFile = configService.getActiveFileContent()
+            val activeFileContent = getActiveFileContent()
+            if (activeFileContent != null) {
+                contextBuilder.append("Active File Content:\n```\n$activeFileContent\n```\n\n")
+            }
 
-        val projectStructure = ReadAction.compute<String, Throwable> {
-            configService.getProjectStructure()
+            val projectStructure = getProjectStructure()
+            contextBuilder.append(projectStructure)
+            
+            contextBuilder.toString()
+        }
+    }
+    
+    /**
+     * Gets the content of the currently active file in the editor
+     * MUST be called inside ReadAction
+     */
+    private fun getActiveFileContent(): String? {
+        val fileEditorManager = FileEditorManager.getInstance(project)
+        val selectedFiles = fileEditorManager.selectedFiles
+        
+        if (selectedFiles.isEmpty()) {
+            return null
         }
         
-        val contextBuilder = StringBuilder()
-        if (activeFile != null) {
-            contextBuilder.append("Active File Content:\n```\n$activeFile\n```\n\n")
-        }
-        contextBuilder.append(projectStructure)
+        val activeFile = selectedFiles[0]
+        val document = FileDocumentManager.getInstance().getDocument(activeFile) ?: return null
         
-        return contextBuilder.toString()
+        val fileName = activeFile.name
+        val filePath = activeFile.path
+        
+        return """
+            File: $fileName
+            Path: $filePath
+            
+            ${document.text}
+        """.trimIndent()
+    }
+    
+    /**
+     * Gets the project structure as a string representation
+     * MUST be called inside ReadAction
+     */
+    private fun getProjectStructure(): String {
+        val builder = StringBuilder()
+        builder.append("Project Structure:\n\n")
+        
+        val basePath = project.basePath
+        if (basePath != null) {
+            builder.append("Base Path: $basePath\n\n")
+        }
+        
+        val projectRootManager = ProjectRootManager.getInstance(project)
+        val contentRoots = projectRootManager.contentRoots
+        
+        if (contentRoots.isNotEmpty()) {
+            builder.append("Content Roots:\n")
+            contentRoots.forEach { root ->
+                builder.append("- ${root.path}\n")
+                appendFileTree(root, builder, 1, maxDepth = 2)
+            }
+        }
+        
+        return builder.toString()
+    }
+    
+    /**
+     * Recursively appends file tree structure
+     * MUST be called inside ReadAction
+     */
+    private fun appendFileTree(
+        file: VirtualFile,
+        builder: StringBuilder,
+        depth: Int,
+        maxDepth: Int
+    ) {
+        if (depth > maxDepth) return
+        
+        val indent = "  ".repeat(depth)
+        val children = file.children ?: return
+        
+        for (child in children) {
+            if (child.isDirectory && child.name in listOf(".git", ".idea", "node_modules", "build", ".gradle", "out")) {
+                continue
+            }
+            
+            if (child.isDirectory) {
+                builder.append("$indent├── ${child.name}/\n")
+                appendFileTree(child, builder, depth + 1, maxDepth)
+            } else {
+                builder.append("$indent├── ${child.name}\n")
+            }
+        }
     }
 }

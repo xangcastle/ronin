@@ -179,7 +179,7 @@ class ChatToolWindow(private val project: Project) {
                 handleFollowUp(nextPrompt, nextSummary)
             },
             onError = { error ->
-                addSystemMessage("❌ Error: $error")
+                addSystemMessage("Error: $error")
                 setGenerating(false)
             },
             onComplete = {

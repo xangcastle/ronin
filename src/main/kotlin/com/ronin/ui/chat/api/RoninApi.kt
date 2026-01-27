@@ -40,12 +40,10 @@ class RoninApi(private val project: Project) {
             handleCommandResult(commandResult, onResponse, onError, onComplete, message)
             return
         }
-        
-        // Add user message to history
+
         val sessionService = project.service<AgentSessionService>()
         sessionService.addMessage("user", message)
-        
-        // Build and execute task
+
         val task = taskBuilder.buildUserMessageTask(message, history)
         executeTaskWithHistory(task, sessionService, onThinking, onResponse, onCommand, onFollowUp, onError, onComplete)
     }
@@ -114,7 +112,6 @@ class RoninApi(private val project: Project) {
             task = task,
             onThinking = onThinking,
             onResponse = { response ->
-                // Extract just the text part for history (not tool output)
                 val textOnly = if (response.contains("\n\n")) {
                     response.substringBefore("\n\n")
                 } else {
