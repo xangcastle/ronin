@@ -67,11 +67,6 @@ class ChatInputField(
         )
     }
 
-    /**
-     * SOLUCIÓN TÉCNICA:
-     * Sobrescribimos getPreferredSize. Esta es la fuente de la verdad para los Layout Managers.
-     * Cada vez que Swing recalcula el layout (llamado por revalidate), entra aquí.
-     */
     override fun getPreferredSize(): Dimension {
         val d = super.getPreferredSize()
 
@@ -94,7 +89,6 @@ class ChatInputField(
             onSendMessage(message)
             ApplicationManager.getApplication().invokeLater {
                 text = ""
-                // Forzar revalidación al limpiar para volver al tamaño mínimo
                 revalidate()
                 repaint()
             }
