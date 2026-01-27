@@ -37,17 +37,16 @@ abstract class BaseRoninAction : AnAction() {
             // 3. Call Service
             com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
                 val llmService = project.service<LLMService>()
-                val configService = project.service<com.ronin.service.RoninConfigService>()
 
                 // Gather Context
-                val activeFile = configService.getActiveFileContent()
-                val projectStructure = configService.getProjectStructure()
+                val activeFile = com.intellij.openapi.application.ReadAction.compute<String?, Throwable> {
+                      com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).selectedTextEditor?.document?.text
+                }
 
                 val contextBuilder = StringBuilder()
                 if (activeFile != null) {
                     contextBuilder.append("Active File Content:\n```\n$activeFile\n```\n\n")
                 }
-                contextBuilder.append(projectStructure)
 
                 val response = llmService.sendMessage(prompt, contextBuilder.toString(), emptyList())
                 

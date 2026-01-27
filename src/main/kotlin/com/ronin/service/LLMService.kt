@@ -15,15 +15,10 @@ class LLMServiceImpl(private val project: Project) : LLMService {
     override fun sendMessage(prompt: String, context: String?, history: List<Map<String, String>>, images: List<String>): String {
         val settings = com.ronin.settings.RoninSettingsState.instance
         
-        // Resolve Active Stance
         val activeStanceName = settings.activeStance
         val stance = settings.stances.find { it.name == activeStanceName } 
             ?: throw IllegalStateException("Active stance '$activeStanceName' not found in configuration.")
             
-        val configService = project.service<RoninConfigService>()
-        val projectContext = configService.getProjectStructure()
-        val projectRules = configService.getProjectRules()
-        
         val systemPrompt = """
             You are Ronin, engaging in the stance of: "${stance.name}".
             ${stance.systemPrompt}
@@ -31,10 +26,9 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             **ENVIRONMENT:**
             - You are working in a Bazel-based monorepo.
             - Scope: ${stance.scope}
-            - $projectContext
-            - Allowed Tools: ${settings.allowedTools}
-            
-            ${if (!projectRules.isNullOrBlank()) "**PROJECT RULES:**\n$projectRules\n" else ""}
+            - Allowed Tools: ${stance.allowedTools}
+            - Execution Command: ${stance.executionCommand}
+
             
             **CORE PROTOCOL (Thought-Action):**
             You must always "think" before you act. Your response must follow this strict XML format:
@@ -57,6 +51,11 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             2. **NO OPEN LOOPS**: If you are just replying to the user (no code action), you MUST use `task_complete` with your message as `content`.
             3. **ANTI-STALLING**: Do NOT stop at `<analysis>`. If you stop, the system hangs. You must proceed to `<execute>`.
             4. **AUTOMATION FAILURE**: If you output only analysis, the automation fails.
+            5. **EXECUTION AUTHORITY**: If the user asks to "run the app" or "start the server", you MUST use the `run_command` tool with the configured **Execution Command** below.
+            6. **NO HALLUCINATIONS**: Do NOT invent new command names like "run_application". Only use the commands listed below.
+            
+            **CONFIGURATION:**
+            - **Execution Command** (Use with `run_command`): `${stance.executionCommand}`
             
             **AVAILABLE COMMANDS:**
             
@@ -113,9 +112,16 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         """.trimIndent()
 
         if (stance.provider == "OpenAI") {
-            // STRICT MODE: Only use the credential explicitly assigned to this Stance.
-            // No Environment Variable Fallbacks. No Global Keys.
-            val apiKey = com.ronin.settings.CredentialHelper.getApiKey(stance.credentialId)
+            var apiKey = com.ronin.settings.CredentialHelper.getApiKey(stance.credentialId)
+            
+            if (!stance.encryptedKey.isNullOrBlank()) {
+                try {
+                    val decoded = String(java.util.Base64.getDecoder().decode(stance.encryptedKey))
+                    if (decoded.isNotBlank()) apiKey = decoded
+                } catch (e: Exception) {
+                    println("Ronin: Failed to decode encrypted key for stance ${stance.name}")
+                }
+            }
             
             if (apiKey.isNullOrBlank()) return "Error: No API Key found for credential ID '${stance.credentialId}'. Please configure it in Settings."
             
@@ -197,14 +203,11 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         
         if (isResponsesApi) {
             requestBody["input"] = messages
-            // For v3 XML protocol, we effectively disable strict schema and rely on prompt
-            requestBody["temperature"] = 0.2 // Low temp for code/XML
+            requestBody["temperature"] = 0.2
         } else {
             requestBody["messages"] = messages
-            requestBody["temperature"] = 0.1 // Low temp for code/XML
+            requestBody["temperature"] = 0.1
         }
-        
-        // NOTE: JSON Schema enforcement removed for v3. XML is guided by prompt.
         
         return com.google.gson.Gson().toJson(requestBody)
     }
@@ -256,17 +259,18 @@ class LLMServiceImpl(private val project: Project) : LLMService {
     
     internal fun parseModelsJson(json: String): List<String> {
         return try {
-            val tempMap = com.google.gson.Gson().fromJson(json, Map::class.java) as Map<String, Any>
-            val data = tempMap["data"] as? List<Map<String, Any>> ?: emptyList()
+            val tempMap = com.google.gson.Gson().fromJson(json, Map::class.java) as Map<*, *>
+            val data = tempMap["data"] as? List<*> ?: emptyList<Any>()
             
             val models = mutableListOf<String>()
             
-            for (modelObj in data) {
+            for (modelItem in data) {
+                val modelObj = modelItem as? Map<*, *> ?: continue
                 val id = modelObj["id"] as? String ?: continue
                 
-                val capabilities = (modelObj["capabilities"] as? Map<String, Any>) 
-                    ?: (modelObj["features"] as? List<String>)?.associate { it to true } 
-                    ?: emptyMap()
+                val capabilities = (modelObj["capabilities"] as? Map<*, *>) 
+                    ?: (modelObj["features"] as? List<*>)?.associate { it.toString() to true } 
+                    ?: emptyMap<Any, Any>()
                     
                 val isChatExplicit = capabilities.keys.any { k -> k.toString().contains("chat") }
                 val isCompletionOnly = capabilities.keys.any { k -> (k.toString() == "completion" || k.toString().contains("text-completion")) } && !isChatExplicit
