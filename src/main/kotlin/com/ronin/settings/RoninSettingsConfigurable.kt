@@ -41,6 +41,7 @@ class RoninSettingsConfigurable : Configurable {
     // Local State
     private var localStances = mutableListOf<Stance>()
     private var currentStanceIndex = -1
+    private var isUpdating = false
 
     override fun getDisplayName(): String = "Ronin"
 
@@ -98,6 +99,7 @@ class RoninSettingsConfigurable : Configurable {
     
     private fun setupListeners() {
         stanceSelector.addActionListener {
+            if (isUpdating) return@addActionListener
             if (currentStanceIndex >= 0 && currentStanceIndex < localStances.size) {
                 saveFormToStance(localStances[currentStanceIndex])
             }
@@ -134,13 +136,20 @@ class RoninSettingsConfigurable : Configurable {
     }
     
     private fun refreshSelector() {
-        val oldSelection = stanceSelector.selectedIndex
-        stanceSelector.removeAllItems()
-        for (s in localStances) {
-            stanceSelector.addItem(s.name)
-        }
-        if (oldSelection >= 0 && oldSelection < localStances.size) {
-            stanceSelector.selectedIndex = oldSelection
+        isUpdating = true
+        try {
+            val oldSelection = stanceSelector.selectedIndex
+            stanceSelector.removeAllItems()
+            for (s in localStances) {
+                stanceSelector.addItem(s.name)
+            }
+            if (oldSelection >= 0 && oldSelection < localStances.size) {
+                stanceSelector.selectedIndex = oldSelection
+            } else if (localStances.isNotEmpty()) {
+                stanceSelector.selectedIndex = 0
+            }
+        } finally {
+            isUpdating = false
         }
     }
     
@@ -211,15 +220,26 @@ class RoninSettingsConfigurable : Configurable {
         settings.allowedTools = allowedToolsField.text
         settings.coreWorkflow = coreWorkflowField.text
         
-        // Reset Logic: If active stance is deleted, default to first available
-        settings.stances.clear()
-        settings.stances.addAll(localStances)
+        val activeStanceId = settings.stances.find { it.name == settings.activeStance }?.id
         
-        if (settings.stances.none { it.name == settings.activeStance } && settings.stances.isNotEmpty()) {
+        settings.stances.clear()
+        for (s in localStances) {
+             settings.stances.add(s.copy()) // Copy to detach from UI
+        }
+        
+        var activeRestored = false
+        if (activeStanceId != null) {
+            val newName = settings.stances.find { it.id == activeStanceId }?.name
+            if (newName != null) {
+                settings.activeStance = newName
+                activeRestored = true
+            }
+        }
+        
+        if (!activeRestored && settings.stances.none { it.name == settings.activeStance } && settings.stances.isNotEmpty()) {
             settings.activeStance = settings.stances[0].name
         }
         
-        // Apply Key Updates
         for ((id, key) in tempKeyUpdates) {
              CredentialHelper.setApiKey(id, key)
         }
