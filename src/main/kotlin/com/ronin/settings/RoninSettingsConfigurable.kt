@@ -24,11 +24,13 @@ class RoninSettingsConfigurable : Configurable {
     
     // Stance Fields
     private val nameField = JBTextField()
+    private val descriptionField = JBTextField()
     private val providerComboBox = ComboBox(arrayOf("OpenAI", "Anthropic", "Google", "Kimi", "Minimax", "Ollama"))
     private val modelField = JBTextField()
     private val scopeField = JBTextField()
     private val credentialIdField = JBTextField()
     private val apiKeyField = JBPasswordField() // Used to update key
+    private val executionCommandField = JBTextField()
     private val systemPromptField = JBTextArea(5, 40)
     
     // Global Fields
@@ -59,11 +61,13 @@ class RoninSettingsConfigurable : Configurable {
         // Stance Form
         val stanceForm = FormBuilder.createFormBuilder()
             .addLabeledComponent("Name:", nameField)
+            .addLabeledComponent("Description:", descriptionField)
             .addLabeledComponent("Provider:", providerComboBox)
             .addLabeledComponent("Model:", modelField)
             .addLabeledComponent("Scope (Tip: Use bazel targets like //core/...):", scopeField)
             .addLabeledComponent("Credential ID:", credentialIdField)
             .addLabeledComponent("Update API Key (Leave empty to keep):", apiKeyField)
+            .addLabeledComponent("Execution Command:", executionCommandField)
             .addLabeledComponent("System Prompt:", JBScrollPane(systemPromptField))
             .addSeparator()
             .panel
@@ -142,20 +146,24 @@ class RoninSettingsConfigurable : Configurable {
     
     private fun loadStanceToForm(s: Stance) {
         nameField.text = s.name
+        descriptionField.text = s.description
         providerComboBox.selectedItem = s.provider
         modelField.text = s.model
         scopeField.text = s.scope
         credentialIdField.text = s.credentialId
+        executionCommandField.text = s.executionCommand
         apiKeyField.text = "" // Always clear password field on load
         systemPromptField.text = s.systemPrompt
     }
     
     private fun saveFormToStance(s: Stance) {
         s.name = nameField.text
+        s.description = descriptionField.text
         s.provider = providerComboBox.selectedItem as? String ?: "OpenAI"
         s.model = modelField.text
         s.scope = scopeField.text
         s.credentialId = credentialIdField.text
+        s.executionCommand = executionCommandField.text
         s.systemPrompt = systemPromptField.text
         
         val newKey = String(apiKeyField.password)
@@ -166,9 +174,11 @@ class RoninSettingsConfigurable : Configurable {
     
     private fun clearForm() {
         nameField.text = ""
+        descriptionField.text = ""
         modelField.text = ""
         scopeField.text = ""
         credentialIdField.text = ""
+        executionCommandField.text = ""
         apiKeyField.text = ""
         systemPromptField.text = ""
     }
