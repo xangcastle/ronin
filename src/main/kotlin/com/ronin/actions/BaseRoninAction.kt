@@ -6,15 +6,9 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.wm.ToolWindowManager
 import com.ronin.ui.chat.ChatToolWindow
 
-/**
- * Base class for Ronin actions that work with selected code
- * Refactored to use the new ChatToolWindow API
- */
+
 abstract class BaseRoninAction : AnAction() {
 
-    /**
-     * Generates the prompt based on the selected code
-     */
     abstract fun getPrompt(code: String): String
 
     override fun update(e: AnActionEvent) {

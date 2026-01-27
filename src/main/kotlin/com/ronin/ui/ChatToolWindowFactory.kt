@@ -9,12 +9,8 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
 import com.ronin.ui.chat.ChatToolWindow
 
-/**
- * Factory for creating the Ronin Chat tool window
- * Simplified to focus only on initialization and toolbar actions
- */
 class ChatToolWindowFactory : ToolWindowFactory {
-    
+
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val chatToolWindow = ChatToolWindow(project)
         val contentFactory = ContentFactory.getInstance()
@@ -24,10 +20,10 @@ class ChatToolWindowFactory : ToolWindowFactory {
         // Add toolbar actions
         setupToolbarActions(toolWindow, chatToolWindow)
     }
-    
+
     private fun setupToolbarActions(toolWindow: ToolWindow, chatToolWindow: ChatToolWindow) {
         val actionGroup = DefaultActionGroup()
-        
+
         actionGroup.add(object : AnAction(
             "Export Conversation...",
             "Save chat history to JSON",
@@ -37,7 +33,7 @@ class ChatToolWindowFactory : ToolWindowFactory {
                 chatToolWindow.exportConversation()
             }
         })
-        
+
         actionGroup.add(object : AnAction(
             "Clear Chat",
             "Reset conversation",
