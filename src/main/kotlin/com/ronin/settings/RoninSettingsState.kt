@@ -26,7 +26,8 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
         var scope: String = "General",
         var credentialId: String = "",
         var executionCommand: String = "bazel run //project:app.binary",
-        var encryptedKey: String? = null
+        var encryptedKey: String? = null,
+        var allowedTools: String = "git, podman, kubectl, argocd, aws, bazel"
     )
 
     var stances: MutableList<Stance> = mutableListOf()
@@ -34,7 +35,6 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
     var settingsEditable: Boolean = true
     
     var ollamaBaseUrl: String = "http://localhost:11434"
-    var allowedTools: String = "git, podman, kubectl, argocd, aws, bazel"
     var coreWorkflow: String = """
         1. **PLAN**: Analyze request.
         2. **EXECUTE**: Return the JSON with commands and edits.
@@ -67,7 +67,7 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
 
     override fun loadState(state: RoninSettingsState) {
         this.ollamaBaseUrl = state.ollamaBaseUrl
-        this.allowedTools = state.allowedTools
+        // allowedTools moved to Stance
         this.coreWorkflow = state.coreWorkflow
         
         this.activeStance = state.activeStance

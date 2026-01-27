@@ -26,7 +26,7 @@ class LLMServiceImpl(private val project: Project) : LLMService {
             **ENVIRONMENT:**
             - You are working in a Bazel-based monorepo.
             - Scope: ${stance.scope}
-            - Allowed Tools: ${settings.allowedTools}
+            - Allowed Tools: ${stance.allowedTools}
             - Execution Command: ${stance.executionCommand}
 
             

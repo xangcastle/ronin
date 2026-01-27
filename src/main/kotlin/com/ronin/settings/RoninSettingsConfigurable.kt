@@ -183,6 +183,7 @@ class RoninSettingsConfigurable : Configurable {
         scopeField.text = s.scope
         credentialIdField.text = s.credentialId
         executionCommandField.text = s.executionCommand
+        allowedToolsField.text = s.allowedTools // Load
         apiKeyField.text = "" // Always clear password field on load
         systemPromptField.text = s.systemPrompt
     }
@@ -195,6 +196,7 @@ class RoninSettingsConfigurable : Configurable {
         s.scope = scopeField.text
         s.credentialId = credentialIdField.text
         s.executionCommand = executionCommandField.text
+        s.allowedTools = allowedToolsField.text // Save
         s.systemPrompt = systemPromptField.text
         
         val newKey = String(apiKeyField.password)
@@ -210,6 +212,7 @@ class RoninSettingsConfigurable : Configurable {
         scopeField.text = ""
         credentialIdField.text = ""
         executionCommandField.text = ""
+        allowedToolsField.text = "" // Clear
         apiKeyField.text = ""
         systemPromptField.text = ""
     }
@@ -223,7 +226,6 @@ class RoninSettingsConfigurable : Configurable {
         }
         
         if (ollamaBaseUrlField.text != settings.ollamaBaseUrl) return true
-        if (allowedToolsField.text != settings.allowedTools) return true
         if (coreWorkflowField.text != settings.coreWorkflow) return true
         if (localStances != settings.stances) return true
         if (tempKeyUpdates.isNotEmpty()) return true
@@ -238,7 +240,7 @@ class RoninSettingsConfigurable : Configurable {
         
         val settings = RoninSettingsState.instance
         settings.ollamaBaseUrl = ollamaBaseUrlField.text
-        settings.allowedTools = allowedToolsField.text
+        // settings.allowedTools removed
         settings.coreWorkflow = coreWorkflowField.text
         
         val activeStanceId = settings.stances.find { it.name == settings.activeStance }?.id
@@ -273,7 +275,7 @@ class RoninSettingsConfigurable : Configurable {
     override fun reset() {
         val settings = RoninSettingsState.instance
         ollamaBaseUrlField.text = settings.ollamaBaseUrl
-        allowedToolsField.text = settings.allowedTools
+        // allowedToolsField reset removed (handled by loadStanceToForm)
         coreWorkflowField.text = settings.coreWorkflow
         
         localStances.clear()
