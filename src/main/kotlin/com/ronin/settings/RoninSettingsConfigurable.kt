@@ -24,11 +24,13 @@ class RoninSettingsConfigurable : Configurable {
     
     // Stance Fields
     private val nameField = JBTextField()
+    private val descriptionField = JBTextField()
     private val providerComboBox = ComboBox(arrayOf("OpenAI", "Anthropic", "Google", "Kimi", "Minimax", "Ollama"))
     private val modelField = JBTextField()
     private val scopeField = JBTextField()
     private val credentialIdField = JBTextField()
     private val apiKeyField = JBPasswordField() // Used to update key
+    private val executionCommandField = JBTextField()
     private val systemPromptField = JBTextArea(5, 40)
     
     // Global Fields
@@ -39,6 +41,7 @@ class RoninSettingsConfigurable : Configurable {
     // Local State
     private var localStances = mutableListOf<Stance>()
     private var currentStanceIndex = -1
+    private var isUpdating = false
 
     override fun getDisplayName(): String = "Ronin"
 
@@ -59,11 +62,13 @@ class RoninSettingsConfigurable : Configurable {
         // Stance Form
         val stanceForm = FormBuilder.createFormBuilder()
             .addLabeledComponent("Name:", nameField)
+            .addLabeledComponent("Description:", descriptionField)
             .addLabeledComponent("Provider:", providerComboBox)
             .addLabeledComponent("Model:", modelField)
             .addLabeledComponent("Scope (Tip: Use bazel targets like //core/...):", scopeField)
             .addLabeledComponent("Credential ID:", credentialIdField)
             .addLabeledComponent("Update API Key (Leave empty to keep):", apiKeyField)
+            .addLabeledComponent("Execution Command:", executionCommandField)
             .addLabeledComponent("System Prompt:", JBScrollPane(systemPromptField))
             .addSeparator()
             .panel
@@ -89,11 +94,34 @@ class RoninSettingsConfigurable : Configurable {
         mainPanel!!.add(JBScrollPane(centerPanel), BorderLayout.CENTER)
 
         setupListeners()
+
+        if (!RoninSettingsState.instance.settingsEditable) {
+            addStanceButton.isEnabled = false
+            removeStanceButton.isEnabled = false
+            
+            nameField.isEditable = false
+            descriptionField.isEditable = false
+            providerComboBox.isEnabled = false
+            modelField.isEditable = false
+            scopeField.isEditable = false
+            credentialIdField.isEditable = false
+            apiKeyField.isEnabled = false
+            executionCommandField.isEditable = false
+            systemPromptField.isEditable = false
+            
+            ollamaBaseUrlField.isEditable = false
+            allowedToolsField.isEditable = false
+            coreWorkflowField.isEditable = false
+            
+            topPanel.add(JLabel("<html><font color='gray'>(Locked by Admin)</font></html>"))
+        }
+
         return mainPanel
     }
     
     private fun setupListeners() {
         stanceSelector.addActionListener {
+            if (isUpdating) return@addActionListener
             if (currentStanceIndex >= 0 && currentStanceIndex < localStances.size) {
                 saveFormToStance(localStances[currentStanceIndex])
             }
@@ -130,32 +158,45 @@ class RoninSettingsConfigurable : Configurable {
     }
     
     private fun refreshSelector() {
-        val oldSelection = stanceSelector.selectedIndex
-        stanceSelector.removeAllItems()
-        for (s in localStances) {
-            stanceSelector.addItem(s.name)
-        }
-        if (oldSelection >= 0 && oldSelection < localStances.size) {
-            stanceSelector.selectedIndex = oldSelection
+        isUpdating = true
+        try {
+            val oldSelection = stanceSelector.selectedIndex
+            stanceSelector.removeAllItems()
+            for (s in localStances) {
+                stanceSelector.addItem(s.name)
+            }
+            if (oldSelection >= 0 && oldSelection < localStances.size) {
+                stanceSelector.selectedIndex = oldSelection
+            } else if (localStances.isNotEmpty()) {
+                stanceSelector.selectedIndex = 0
+            }
+        } finally {
+            isUpdating = false
         }
     }
     
     private fun loadStanceToForm(s: Stance) {
         nameField.text = s.name
+        descriptionField.text = s.description
         providerComboBox.selectedItem = s.provider
         modelField.text = s.model
         scopeField.text = s.scope
         credentialIdField.text = s.credentialId
+        executionCommandField.text = s.executionCommand
+        allowedToolsField.text = s.allowedTools // Load
         apiKeyField.text = "" // Always clear password field on load
         systemPromptField.text = s.systemPrompt
     }
     
     private fun saveFormToStance(s: Stance) {
         s.name = nameField.text
+        s.description = descriptionField.text
         s.provider = providerComboBox.selectedItem as? String ?: "OpenAI"
         s.model = modelField.text
         s.scope = scopeField.text
         s.credentialId = credentialIdField.text
+        s.executionCommand = executionCommandField.text
+        s.allowedTools = allowedToolsField.text // Save
         s.systemPrompt = systemPromptField.text
         
         val newKey = String(apiKeyField.password)
@@ -166,14 +207,16 @@ class RoninSettingsConfigurable : Configurable {
     
     private fun clearForm() {
         nameField.text = ""
+        descriptionField.text = ""
         modelField.text = ""
         scopeField.text = ""
         credentialIdField.text = ""
+        executionCommandField.text = ""
+        allowedToolsField.text = "" // Clear
         apiKeyField.text = ""
         systemPromptField.text = ""
     }
 
-    // Temporary storage for key updates (CredID -> NewKey)
     private val tempKeyUpdates = mutableMapOf<String, String>()
 
     override fun isModified(): Boolean {
@@ -183,7 +226,6 @@ class RoninSettingsConfigurable : Configurable {
         }
         
         if (ollamaBaseUrlField.text != settings.ollamaBaseUrl) return true
-        if (allowedToolsField.text != settings.allowedTools) return true
         if (coreWorkflowField.text != settings.coreWorkflow) return true
         if (localStances != settings.stances) return true
         if (tempKeyUpdates.isNotEmpty()) return true
@@ -198,18 +240,29 @@ class RoninSettingsConfigurable : Configurable {
         
         val settings = RoninSettingsState.instance
         settings.ollamaBaseUrl = ollamaBaseUrlField.text
-        settings.allowedTools = allowedToolsField.text
+        // settings.allowedTools removed
         settings.coreWorkflow = coreWorkflowField.text
         
-        // Reset Logic: If active stance is deleted, default to first available
-        settings.stances.clear()
-        settings.stances.addAll(localStances)
+        val activeStanceId = settings.stances.find { it.name == settings.activeStance }?.id
         
-        if (settings.stances.none { it.name == settings.activeStance } && settings.stances.isNotEmpty()) {
+        settings.stances.clear()
+        for (s in localStances) {
+             settings.stances.add(s.copy())
+        }
+        
+        var activeRestored = false
+        if (activeStanceId != null) {
+            val newName = settings.stances.find { it.id == activeStanceId }?.name
+            if (newName != null) {
+                settings.activeStance = newName
+                activeRestored = true
+            }
+        }
+        
+        if (!activeRestored && settings.stances.none { it.name == settings.activeStance } && settings.stances.isNotEmpty()) {
             settings.activeStance = settings.stances[0].name
         }
         
-        // Apply Key Updates
         for ((id, key) in tempKeyUpdates) {
              CredentialHelper.setApiKey(id, key)
         }
@@ -222,7 +275,7 @@ class RoninSettingsConfigurable : Configurable {
     override fun reset() {
         val settings = RoninSettingsState.instance
         ollamaBaseUrlField.text = settings.ollamaBaseUrl
-        allowedToolsField.text = settings.allowedTools
+        // allowedToolsField reset removed (handled by loadStanceToForm)
         coreWorkflowField.text = settings.coreWorkflow
         
         localStances.clear()
@@ -233,14 +286,23 @@ class RoninSettingsConfigurable : Configurable {
         tempKeyUpdates.clear()
         refreshSelector()
         
-        // Try to select active stance
         val activeIdx = localStances.indexOfFirst { it.name == settings.activeStance }
+        
         if (activeIdx >= 0) {
             currentStanceIndex = activeIdx
+            isUpdating = true
             stanceSelector.selectedIndex = activeIdx
+            isUpdating = false
+            loadStanceToForm(localStances[activeIdx])
         } else if (localStances.isNotEmpty()) {
             currentStanceIndex = 0
+            isUpdating = true
             stanceSelector.selectedIndex = 0
+            isUpdating = false
+            loadStanceToForm(localStances[0])
+        } else {
+             currentStanceIndex = -1
+             clearForm()
         }
     }
 

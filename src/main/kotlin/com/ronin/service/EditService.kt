@@ -44,13 +44,12 @@ class EditService(private val project: Project) {
                             }
                         }
                         
-                        if (virtualFile != null) {
-                            // Ensure file is writable (as per Strategy Doc)
-                            if (!com.intellij.openapi.vfs.ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(listOf(virtualFile)).hasReadonlyFiles()) {
-                                val document = FileDocumentManager.getInstance().getDocument(virtualFile)
-                                if (document != null) {
-                                    val text = document.text
-                                
+                        // Ensure file is writable (as per Strategy Doc)
+                        if (!com.intellij.openapi.vfs.ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(listOf(virtualFile!!)).hasReadonlyFiles()) {
+                            val document = FileDocumentManager.getInstance().getDocument(virtualFile)
+                            if (document != null) {
+                                val text = document.text
+                            
                                 if (op.startLine != null && op.endLine != null) {
                                     // LINE-BASED REPLACEMENT (Refined)
                                     val startLineIdx = (op.startLine - 1).coerceAtLeast(0)
@@ -136,9 +135,8 @@ class EditService(private val project: Project) {
                                 // FORCE PSI COMMIT
                                 com.intellij.psi.PsiDocumentManager.getInstance(project).commitDocument(document)
                             }
-                            } else {
-                                results.add("Error: File is read-only: ${op.path}")
-                            }
+                        } else {
+                            results.add("Error: File is read-only: ${op.path}")
                         }
                     } catch (e: Exception) {
                         results.add("Exception applying edit to ${op.path}: ${e.message}")
