@@ -164,7 +164,6 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
         
         this.activeStance = state.activeStance
         
-        // Preserve default stances if loading empty state, otherwise load user state
         if (state.stances.isNotEmpty()) {
             this.stances.clear()
             this.stances.addAll(state.stances)

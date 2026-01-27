@@ -265,12 +265,22 @@ class RoninSettingsConfigurable : Configurable {
         
         // Try to select active stance
         val activeIdx = localStances.indexOfFirst { it.name == settings.activeStance }
+        
         if (activeIdx >= 0) {
             currentStanceIndex = activeIdx
+            isUpdating = true
             stanceSelector.selectedIndex = activeIdx
+            isUpdating = false
+            loadStanceToForm(localStances[activeIdx])
         } else if (localStances.isNotEmpty()) {
             currentStanceIndex = 0
+            isUpdating = true
             stanceSelector.selectedIndex = 0
+            isUpdating = false
+            loadStanceToForm(localStances[0])
+        } else {
+             currentStanceIndex = -1
+             clearForm()
         }
     }
 
