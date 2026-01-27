@@ -14,22 +14,18 @@ plugins {
 group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 
-// Set the JVM language level used to build the project.
 kotlin {
     jvmToolchain(21)
 }
 
-// Configure project's dependencies
 repositories {
     mavenCentral()
 
-    // IntelliJ Platform Gradle Plugin Repositories Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-repositories-extension.html
     intellijPlatform {
         defaultRepositories()
     }
 }
 
-// Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/version_catalogs.html
 dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.opentest4j)
@@ -38,7 +34,6 @@ dependencies {
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.16.1")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.16.1")
 
-    // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {
         intellijIdea(providers.gradleProperty("platformVersion"))
 
@@ -140,10 +135,15 @@ tasks {
     }
 
     named("processResources", ProcessResources::class) {
-        val stancesPath = project.findProperty("stances") as? String
-        if (!stancesPath.isNullOrBlank()) {
-            from(stancesPath) {
-                rename { "default_stances.json" }
+        val roninProfile = project.findProperty("roninProfile") as? String
+        if (!roninProfile.isNullOrBlank()) {
+            val profileFile = file(roninProfile)
+            if (profileFile.exists()) {
+                filesMatching("ronin-profile.json") {
+                    filter { profileFile.readText() }
+                }
+            } else {
+                logger.warn("Ronin: Profile file not found: $roninProfile")
             }
         }
     }

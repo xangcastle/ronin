@@ -94,6 +94,28 @@ class RoninSettingsConfigurable : Configurable {
         mainPanel!!.add(JBScrollPane(centerPanel), BorderLayout.CENTER)
 
         setupListeners()
+
+        if (!RoninSettingsState.instance.settingsEditable) {
+            addStanceButton.isEnabled = false
+            removeStanceButton.isEnabled = false
+            
+            nameField.isEditable = false
+            descriptionField.isEditable = false
+            providerComboBox.isEnabled = false
+            modelField.isEditable = false
+            scopeField.isEditable = false
+            credentialIdField.isEditable = false
+            apiKeyField.isEnabled = false
+            executionCommandField.isEditable = false
+            systemPromptField.isEditable = false
+            
+            ollamaBaseUrlField.isEditable = false
+            allowedToolsField.isEditable = false
+            coreWorkflowField.isEditable = false
+            
+            topPanel.add(JLabel("<html><font color='gray'>(Locked by Admin)</font></html>"))
+        }
+
         return mainPanel
     }
     
@@ -192,7 +214,6 @@ class RoninSettingsConfigurable : Configurable {
         systemPromptField.text = ""
     }
 
-    // Temporary storage for key updates (CredID -> NewKey)
     private val tempKeyUpdates = mutableMapOf<String, String>()
 
     override fun isModified(): Boolean {
@@ -224,7 +245,7 @@ class RoninSettingsConfigurable : Configurable {
         
         settings.stances.clear()
         for (s in localStances) {
-             settings.stances.add(s.copy()) // Copy to detach from UI
+             settings.stances.add(s.copy())
         }
         
         var activeRestored = false
@@ -263,7 +284,6 @@ class RoninSettingsConfigurable : Configurable {
         tempKeyUpdates.clear()
         refreshSelector()
         
-        // Try to select active stance
         val activeIdx = localStances.indexOfFirst { it.name == settings.activeStance }
         
         if (activeIdx >= 0) {

@@ -26,35 +26,41 @@ class TerminalService(private val project: Project) {
              listOf(shell, "-i", "-l", "-c")
         }
         
+        var process: Process? = null
         try {
             onOutput("Ronin Shell: Using ${shellCmd.first()} (Interactive/Login) to execute: $command\n")
             
             val processBuilder = ProcessBuilder(shellCmd + command)
             processBuilder.directory(File(basePath))
             processBuilder.redirectErrorStream(true) // Merge stdout and stderr
-            
             processBuilder.environment().putAll(System.getenv())
             
-            val process = processBuilder.start()
+            process = processBuilder.start()
+            val currentProcess = process
             
             val output = StringBuilder()
-            val reader = process.inputStream.bufferedReader()
+            val reader = currentProcess.inputStream.bufferedReader()
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 val text = line + "\n"
                 onOutput(text)
                 output.append(text)
+                if (Thread.interrupted()) throw InterruptedException()
             }
             
-            val completed = process.waitFor(60, TimeUnit.MINUTES)
+            val completed = currentProcess.waitFor(60, TimeUnit.MINUTES)
             if (!completed) {
-                process.destroy()
+                currentProcess.destroyForcibly()
                 return output.toString() + "\nError: Command timed out after 60 minutes."
             }
             
             return output.toString()
             
+        } catch (e: InterruptedException) {
+            process?.destroyForcibly()
+            return "Command cancelled by user."
         } catch (e: Exception) {
+            process?.destroyForcibly()
             return "Error executing command: ${e.message}"
         }
     }

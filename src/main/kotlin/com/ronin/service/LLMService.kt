@@ -15,7 +15,6 @@ class LLMServiceImpl(private val project: Project) : LLMService {
     override fun sendMessage(prompt: String, context: String?, history: List<Map<String, String>>, images: List<String>): String {
         val settings = com.ronin.settings.RoninSettingsState.instance
         
-        // Resolve Active Stance
         val activeStanceName = settings.activeStance
         val stance = settings.stances.find { it.name == activeStanceName } 
             ?: throw IllegalStateException("Active stance '$activeStanceName' not found in configuration.")
@@ -113,9 +112,16 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         """.trimIndent()
 
         if (stance.provider == "OpenAI") {
-            // STRICT MODE: Only use the credential explicitly assigned to this Stance.
-            // No Environment Variable Fallbacks. No Global Keys.
-            val apiKey = com.ronin.settings.CredentialHelper.getApiKey(stance.credentialId)
+            var apiKey = com.ronin.settings.CredentialHelper.getApiKey(stance.credentialId)
+            
+            if (!stance.encryptedKey.isNullOrBlank()) {
+                try {
+                    val decoded = String(java.util.Base64.getDecoder().decode(stance.encryptedKey))
+                    if (decoded.isNotBlank()) apiKey = decoded
+                } catch (e: Exception) {
+                    println("Ronin: Failed to decode encrypted key for stance ${stance.name}")
+                }
+            }
             
             if (apiKey.isNullOrBlank()) return "Error: No API Key found for credential ID '${stance.credentialId}'. Please configure it in Settings."
             
@@ -197,14 +203,11 @@ class LLMServiceImpl(private val project: Project) : LLMService {
         
         if (isResponsesApi) {
             requestBody["input"] = messages
-            // For v3 XML protocol, we effectively disable strict schema and rely on prompt
-            requestBody["temperature"] = 0.2 // Low temp for code/XML
+            requestBody["temperature"] = 0.2
         } else {
             requestBody["messages"] = messages
-            requestBody["temperature"] = 0.1 // Low temp for code/XML
+            requestBody["temperature"] = 0.1
         }
-        
-        // NOTE: JSON Schema enforcement removed for v3. XML is guided by prompt.
         
         return com.google.gson.Gson().toJson(requestBody)
     }
