@@ -23,11 +23,8 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
         var systemPrompt: String = "",
         var provider: String = "OpenAI",
         var model: String = "gpt-4o-mini",
-        var scope: String = "General",
         var credentialId: String = "",
-        var executionCommand: String = "bazel run //project:app.binary",
-        var encryptedKey: String? = null,
-        var allowedTools: String = "git, podman, kubectl, argocd, aws, bazel"
+        var encryptedKey: String? = null
     )
 
     var stances: MutableList<Stance> = mutableListOf()
@@ -35,27 +32,88 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
     var settingsEditable: Boolean = true
     
     var ollamaBaseUrl: String = "http://localhost:11434"
-    var coreWorkflow: String = """
-        1. **PLAN**: Analyze request.
-        2. **EXECUTE**: Return the JSON with commands and edits.
-        3. **VERIFY**: Check if the goal is achieved. Only run verification commands (test/build) if necessary to validate code changes. Do NOT verify simple info queries (e.g. pwd, ls).
-    """.trimIndent()
 
     init {
-        val profileResource = RoninSettingsState::class.java.getResource("/ronin-profile.json")
-        if (stances.isEmpty() && profileResource != null) {
-            try {
-                val content = profileResource.readText()
-                val profile = com.google.gson.Gson().fromJson(content, Profile::class.java)
+        loadStancesFromResources()
+    }
+
+    private fun loadStancesFromResources() {
+        if (stances.isNotEmpty()) return
+
+        try {
+            val url = RoninSettingsState::class.java.getResource("/stances") ?: return
+            
+            if (url.protocol == "file") {
+                val dir = java.io.File(url.toURI())
+                val files = dir.listFiles { _, name -> name.endsWith(".md") } ?: return
                 
-                this.settingsEditable = profile.settingsEditable
-                
-                if (profile.stances.isNotEmpty()) {
-                    stances.addAll(profile.stances)
+                for (file in files) {
+                    val content = file.readText()
+                    val stance = parseStanceMarkdown(file.nameWithoutExtension, content)
+                    if (stance != null) {
+                        stances.add(stance)
+                    }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } else if (url.protocol == "jar") {
+                val connection = url.openConnection() as java.net.JarURLConnection
+                val jarFile = connection.jarFile
+                val entries = jarFile.entries()
+                
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    val name = entry.name
+                    // Check if it is within our target directory and is a markdown file
+                    if (name.startsWith("stances/") && name.endsWith(".md") && !entry.isDirectory) {
+                         val filename = name.substringAfterLast('/')
+                         val id = filename.substringBeforeLast('.')
+                         
+                         val inputStream = jarFile.getInputStream(entry)
+                         val content = inputStream.bufferedReader().use { it.readText() }
+                         val stance = parseStanceMarkdown(id, content)
+                         if (stance != null) {
+                             stances.add(stance)
+                         }
+                    }
+                }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun parseStanceMarkdown(filenameId: String, content: String): Stance? {
+        try {
+            val parts = content.split("---", limit = 3)
+            if (parts.size < 3) return null // Invalid format
+            
+            val frontmatter = parts[1]
+            val systemPrompt = parts[2].trim()
+            
+            val stance = Stance(id = filenameId)
+            stance.systemPrompt = systemPrompt
+            
+            // Parse Frontmatter (Simple Key-Value)
+            frontmatter.lines().forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isNotBlank() && trimmed.contains(":")) {
+                    val split = trimmed.split(":", limit = 2)
+                    val key = split[0].trim()
+                    val value = split[1].trim()
+                    
+                    when (key) {
+                        "name" -> stance.name = value
+                        "description" -> stance.description = value
+                        "provider" -> stance.provider = value
+                        "model" -> stance.model = value
+                        "credentialId" -> stance.credentialId = value
+                        "encryptedKey" -> stance.encryptedKey = value
+                    }
+                }
+            }
+            return stance
+        } catch (e: Exception) {
+            println("Ronin: Failed to parse stance file $filenameId: ${e.message}")
+            return null
         }
     }
     
@@ -68,8 +126,6 @@ class RoninSettingsState : PersistentStateComponent<RoninSettingsState> {
     override fun loadState(state: RoninSettingsState) {
         this.ollamaBaseUrl = state.ollamaBaseUrl
         // allowedTools moved to Stance
-        this.coreWorkflow = state.coreWorkflow
-        
         this.activeStance = state.activeStance
         this.settingsEditable = state.settingsEditable
         

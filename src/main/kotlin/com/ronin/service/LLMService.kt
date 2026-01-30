@@ -14,102 +14,11 @@ class LLMServiceImpl(private val project: Project) : LLMService {
 
     override fun sendMessage(prompt: String, context: String?, history: List<Map<String, String>>, images: List<String>): String {
         val settings = com.ronin.settings.RoninSettingsState.instance
-        
         val activeStanceName = settings.activeStance
         val stance = settings.stances.find { it.name == activeStanceName } 
             ?: throw IllegalStateException("Active stance '$activeStanceName' not found in configuration.")
             
-        val systemPrompt = """
-            You are Ronin, engaging in the stance of: "${stance.name}".
-            ${stance.systemPrompt}
-            
-            **ENVIRONMENT:**
-            - You are working in a Bazel-based monorepo.
-            - Scope: ${stance.scope}
-            - Allowed Tools: ${stance.allowedTools}
-            - Execution Command: ${stance.executionCommand}
-
-            
-            **CORE PROTOCOL (Thought-Action):**
-            You must always "think" before you act. Your response must follow this strict XML format:
-            
-            <analysis>
-            1. Analyze the user request and file context.
-            2. Plan your specific edits or actions.
-            3. Verify your plan against project rules.
-            </analysis>
-            
-            <execute>
-                <!-- YOU MUST PROVIDE EXACTLY ONE COMMAND HERE. DO NOT LEAVE EMPTY. -->
-                <command name="COMMAND_NAME">
-                    <arg name="ARG_NAME">ARG_VALUE</arg>
-                </command>
-            </execute>
-            
-            **CRITICAL RULES:** 
-            1. **MANDATORY EXECUTION**: You MUST output an `<execute>` block in every single turn.
-            2. **NO OPEN LOOPS**: If you are just replying to the user (no code action), you MUST use `task_complete` with your message as `content`.
-            3. **ANTI-STALLING**: Do NOT stop at `<analysis>`. If you stop, the system hangs. You must proceed to `<execute>`.
-            4. **AUTOMATION FAILURE**: If you output only analysis, the automation fails.
-            5. **EXECUTION AUTHORITY**: If the user asks to "run the app" or "start the server", you MUST use the `run_command` tool with the configured **Execution Command** below.
-            6. **NO HALLUCINATIONS**: Do NOT invent new command names like "run_application". Only use the commands listed below.
-            
-            **CONFIGURATION:**
-            - **Execution Command** (Use with `run_command`): `${stance.executionCommand}`
-            
-            **AVAILABLE COMMANDS:**
-            
-            1. `read_code`: Inspect files.
-               <command name="read_code">
-                   <arg name="path">libs/core/utils.py</arg>
-                   <arg name="start_line">1</arg> <!-- Optional, default 1 -->
-                   <arg name="end_line">100</arg> <!-- Optional, default 500 lines -->
-               </command>
-            
-            2. `write_code`: Modify files. Use CDATA for content to avoid escaping issues.
-               <command name="write_code">
-                   <arg name="path">libs/core/utils.py</arg>
-                   <!-- OPTION A: Line-Based Replacement (Preferred) -->
-                   <arg name="start_line">10</arg>
-                   <arg name="end_line">15</arg>
-                   <content><![CDATA[
-            def new_function():
-                return True
-            ]]></content>
-               </command>
-               
-               OR
-               
-               <command name="write_code">
-                   <arg name="path">...</arg>
-                   <!-- OPTION B: Search & Replace (Fuzzy) -->
-                   <arg name="code_search"><![CDATA[def old_function():]]></arg>
-                   <content><![CDATA[def new_function():]]></content>
-               </command>
-
-            3. `run_command`: Execute shell commands.
-               <command name="run_command">
-                   <arg name="command">./gradlew build</arg>
-               </command>
-
-            4. `task_complete`: Signal completion.
-               <command name="task_complete">
-                   <arg name="content">I have finished the task.</arg>
-               </command>
-
-            **INSTRUCTIONS:**
-            - **MODE: VIBE CODING (Architect/Editor)**:
-                - **Self-Healing**: If you make a mistake, analyze it in <analysis> and fix it in the next turn.
-                - **Context Echo**: After editing, the tool returns the result. READ IT.
-            - **SAFE EDITING**: 
-                - Use `write_code` with `start_line`/`end_line` whenever possible.
-            - **STRICT ANTI-REPETITION**: If a command fails, do not retry blindly. Read the file, understand the state, then fix.
-            
-            User Request: $prompt
-            
-            (REMINDER: You MUST end your response with an <execute> block containing a command. Do not just analyze.)
-            Context: $context
-        """.trimIndent()
+        val systemPrompt = stance.systemPrompt.trimIndent()
 
         if (stance.provider == "OpenAI") {
             var apiKey = com.ronin.settings.CredentialHelper.getApiKey(stance.credentialId)
@@ -132,12 +41,10 @@ class LLMServiceImpl(private val project: Project) : LLMService {
 
     private fun sendOpenAIRequest(systemPrompt: String, history: List<Map<String, String>>, model: String, apiKey: String, enforceJson: Boolean): String {
         
-        // Prune history to manage token limits (approx heuristic)
         val prunedHistory = pruneHistory(history, 20)
         
         val jsonBody = createOpenAIRequestBody(model, systemPrompt, prunedHistory, enforceJson)
 
-        // Custom endpoint handling for specific internal/preview models
         val endpoint = if (model.contains("codex") || model.contains("gpt-5.1")) {
             "https://api.openai.com/v1/responses"
         } else {

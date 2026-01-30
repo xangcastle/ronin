@@ -27,16 +27,12 @@ class RoninSettingsConfigurable : Configurable {
     private val descriptionField = JBTextField()
     private val providerComboBox = ComboBox(arrayOf("OpenAI", "Anthropic", "Google", "Kimi", "Minimax", "Ollama"))
     private val modelField = JBTextField()
-    private val scopeField = JBTextField()
     private val credentialIdField = JBTextField()
     private val apiKeyField = JBPasswordField() // Used to update key
-    private val executionCommandField = JBTextField()
     private val systemPromptField = JBTextArea(5, 40)
     
     // Global Fields
     private val ollamaBaseUrlField = JBTextField()
-    private val allowedToolsField = JBTextField()
-    private val coreWorkflowField = JBTextArea(5, 40)
 
     // Local State
     private var localStances = mutableListOf<Stance>()
@@ -48,8 +44,6 @@ class RoninSettingsConfigurable : Configurable {
     override fun createComponent(): JComponent? {
         systemPromptField.lineWrap = true
         systemPromptField.wrapStyleWord = true
-        coreWorkflowField.lineWrap = true
-        coreWorkflowField.wrapStyleWord = true
 
         // Top Bar: Selector + Buttons
         val topPanel = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT))
@@ -65,10 +59,8 @@ class RoninSettingsConfigurable : Configurable {
             .addLabeledComponent("Description:", descriptionField)
             .addLabeledComponent("Provider:", providerComboBox)
             .addLabeledComponent("Model:", modelField)
-            .addLabeledComponent("Scope (Tip: Use bazel targets like //core/...):", scopeField)
             .addLabeledComponent("Credential ID:", credentialIdField)
             .addLabeledComponent("Update API Key (Leave empty to keep):", apiKeyField)
-            .addLabeledComponent("Execution Command:", executionCommandField)
             .addLabeledComponent("System Prompt:", JBScrollPane(systemPromptField))
             .addSeparator()
             .panel
@@ -78,8 +70,6 @@ class RoninSettingsConfigurable : Configurable {
             .addSeparator()
             .addSeparator()
             .addLabeledComponent(MyBundle.message("settings.ollama_url"), ollamaBaseUrlField)
-            .addLabeledComponent(MyBundle.message("settings.allowed_tools"), allowedToolsField)
-            .addLabeledComponent(MyBundle.message("settings.core_workflow"), JBScrollPane(coreWorkflowField))
             .addComponentFillVertically(JPanel(), 0)
             .panel
             
@@ -103,15 +93,11 @@ class RoninSettingsConfigurable : Configurable {
             descriptionField.isEditable = false
             providerComboBox.isEnabled = false
             modelField.isEditable = false
-            scopeField.isEditable = false
             credentialIdField.isEditable = false
             apiKeyField.isEnabled = false
-            executionCommandField.isEditable = false
             systemPromptField.isEditable = false
             
             ollamaBaseUrlField.isEditable = false
-            allowedToolsField.isEditable = false
-            coreWorkflowField.isEditable = false
             
             topPanel.add(JLabel("<html><font color='gray'>(Locked by Admin)</font></html>"))
         }
@@ -180,10 +166,7 @@ class RoninSettingsConfigurable : Configurable {
         descriptionField.text = s.description
         providerComboBox.selectedItem = s.provider
         modelField.text = s.model
-        scopeField.text = s.scope
         credentialIdField.text = s.credentialId
-        executionCommandField.text = s.executionCommand
-        allowedToolsField.text = s.allowedTools // Load
         apiKeyField.text = "" // Always clear password field on load
         systemPromptField.text = s.systemPrompt
     }
@@ -193,10 +176,7 @@ class RoninSettingsConfigurable : Configurable {
         s.description = descriptionField.text
         s.provider = providerComboBox.selectedItem as? String ?: "OpenAI"
         s.model = modelField.text
-        s.scope = scopeField.text
         s.credentialId = credentialIdField.text
-        s.executionCommand = executionCommandField.text
-        s.allowedTools = allowedToolsField.text // Save
         s.systemPrompt = systemPromptField.text
         
         val newKey = String(apiKeyField.password)
@@ -209,10 +189,7 @@ class RoninSettingsConfigurable : Configurable {
         nameField.text = ""
         descriptionField.text = ""
         modelField.text = ""
-        scopeField.text = ""
         credentialIdField.text = ""
-        executionCommandField.text = ""
-        allowedToolsField.text = "" // Clear
         apiKeyField.text = ""
         systemPromptField.text = ""
     }
@@ -226,7 +203,6 @@ class RoninSettingsConfigurable : Configurable {
         }
         
         if (ollamaBaseUrlField.text != settings.ollamaBaseUrl) return true
-        if (coreWorkflowField.text != settings.coreWorkflow) return true
         if (localStances != settings.stances) return true
         if (tempKeyUpdates.isNotEmpty()) return true
         
@@ -240,8 +216,6 @@ class RoninSettingsConfigurable : Configurable {
         
         val settings = RoninSettingsState.instance
         settings.ollamaBaseUrl = ollamaBaseUrlField.text
-        // settings.allowedTools removed
-        settings.coreWorkflow = coreWorkflowField.text
         
         val activeStanceId = settings.stances.find { it.name == settings.activeStance }?.id
         
@@ -275,8 +249,6 @@ class RoninSettingsConfigurable : Configurable {
     override fun reset() {
         val settings = RoninSettingsState.instance
         ollamaBaseUrlField.text = settings.ollamaBaseUrl
-        // allowedToolsField reset removed (handled by loadStanceToForm)
-        coreWorkflowField.text = settings.coreWorkflow
         
         localStances.clear()
         for (s in settings.stances) {

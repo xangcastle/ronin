@@ -5,4 +5,4 @@
 .kotlin
 .qodana
 build
-src/main/resources/ronin-profile.json
+src/main/resources/stances
