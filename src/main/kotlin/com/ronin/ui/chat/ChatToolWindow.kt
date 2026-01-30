@@ -393,10 +393,10 @@ class ChatToolWindow(private val project: Project) {
             val isThinking = role == "Ronin Thinking"
             
             val bubble = when {
-                isUser -> MessageBubble.createUserMessage(message, scrollPane.viewport.width)
-                isSystem -> MessageBubble.createSystemMessage(message, scrollPane.viewport.width)
-                isThinking -> MessageBubble.createThinkingMessage(message, scrollPane.viewport.width)
-                else -> MessageBubble.createAssistantMessage(message, scrollPane.viewport.width)
+                isUser -> MessageBubble.createUserMessage(message)
+                isSystem -> MessageBubble.createSystemMessage(message)
+                isThinking -> MessageBubble.createThinkingMessage(message)
+                else -> MessageBubble.createAssistantMessage(message)
             }
             
             chatPanel.add(bubble)

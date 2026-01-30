@@ -68,19 +68,21 @@ class ChatInputField(
     }
 
     override fun getPreferredSize(): Dimension {
-        val d = super.getPreferredSize()
+        return ApplicationManager.getApplication().runWriteIntentReadAction<Dimension, RuntimeException> {
+            val d = super.getPreferredSize()
 
-        val editor = this.editor ?: return d
+            val editor = this.editor ?: return@runWriteIntentReadAction d
 
-        val lineHeight = editor.lineHeight
-        val lineCount = document.lineCount.coerceAtLeast(1)
+            val lineHeight = editor.lineHeight
+            val lineCount = document.lineCount.coerceAtLeast(1)
 
-        val linesToShow = lineCount.coerceAtMost(MAX_VISIBLE_LINES)
+            val linesToShow = lineCount.coerceAtMost(MAX_VISIBLE_LINES)
 
-        val insets = insets
-        val contentHeight = (linesToShow * lineHeight) + insets.top + insets.bottom + 4
+            val insets = insets
+            val contentHeight = (linesToShow * lineHeight) + insets.top + insets.bottom + 4
 
-        return Dimension(d.width, contentHeight.coerceAtLeast(MIN_HEIGHT))
+            Dimension(d.width, contentHeight.coerceAtLeast(MIN_HEIGHT))
+        }
     }
 
     private fun sendMessage() {

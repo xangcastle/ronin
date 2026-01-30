@@ -28,8 +28,7 @@ enum class BubbleType {
  */
 class MessageBubble private constructor(
     private val type: BubbleType,
-    private val message: String,
-    private val maxWidth: Int
+    private val message: String
 ) : JPanel(GridBagLayout()) {
     
     init {
@@ -44,16 +43,9 @@ class MessageBubble private constructor(
         c.weightx = 1.0
         c.fill = GridBagConstraints.HORIZONTAL
         
-        when (type) {
-            BubbleType.USER -> {
-                c.anchor = GridBagConstraints.EAST
-                c.insets = Insets(0, 50, 0, 0)
-            }
-            else -> {
-                c.anchor = GridBagConstraints.WEST
-                c.insets = Insets(0, 0, 0, 50)
-            }
-        }
+        // Make sure it fills the width
+        c.anchor = GridBagConstraints.CENTER
+        c.insets = Insets(0, 0, 0, 0)
         
         val textArea = createTextArea()
         val bubbleWrapper = JPanel(BorderLayout())
@@ -64,7 +56,7 @@ class MessageBubble private constructor(
     }
     
     private fun createTextArea(): JTextArea {
-        val textArea = DynamicTextArea(message, maxWidth)
+        val textArea = JTextArea(message)
         textArea.lineWrap = true
         textArea.wrapStyleWord = true
         textArea.isEditable = false
@@ -101,58 +93,33 @@ class MessageBubble private constructor(
         return textArea
     }
     
-    /**
-     * Text area that dynamically adjusts its width
-     */
-    private class DynamicTextArea(text: String, private val maxWidth: Int) : JTextArea(text) {
-        override fun getPreferredSize(): java.awt.Dimension {
-            val d = super.getPreferredSize()
-            val effectiveMaxWidth = (maxWidth * 0.85).toInt()
-            if (effectiveMaxWidth > 100 && d.width > effectiveMaxWidth) {
-                return java.awt.Dimension(effectiveMaxWidth, d.height)
-            }
-            return d
-        }
-        
-        override fun getScrollableTracksViewportWidth(): Boolean = true
-        
-        override fun setBounds(x: Int, y: Int, width: Int, height: Int) {
-            var w = width
-            val effectiveMaxWidth = (maxWidth * 0.85).toInt()
-            if (w > effectiveMaxWidth) {
-                w = effectiveMaxWidth
-            }
-            super.setBounds(x, y, w, height)
-        }
-    }
-    
     companion object {
         /**
          * Creates a user message bubble
          */
-        fun createUserMessage(message: String, maxWidth: Int = 600): JComponent {
-            return MessageBubble(BubbleType.USER, message, maxWidth)
+        fun createUserMessage(message: String): JComponent {
+            return MessageBubble(BubbleType.USER, message)
         }
         
         /**
          * Creates an assistant message bubble
          */
-        fun createAssistantMessage(message: String, maxWidth: Int = 600): JComponent {
-            return MessageBubble(BubbleType.ASSISTANT, message, maxWidth)
+        fun createAssistantMessage(message: String): JComponent {
+            return MessageBubble(BubbleType.ASSISTANT, message)
         }
         
         /**
          * Creates a system message bubble
          */
-        fun createSystemMessage(message: String, maxWidth: Int = 600): JComponent {
-            return MessageBubble(BubbleType.SYSTEM, message, maxWidth)
+        fun createSystemMessage(message: String): JComponent {
+            return MessageBubble(BubbleType.SYSTEM, message)
         }
         
         /**
          * Creates a thinking message bubble
          */
-        fun createThinkingMessage(message: String, maxWidth: Int = 600): JComponent {
-            return MessageBubble(BubbleType.THINKING, message, maxWidth)
+        fun createThinkingMessage(message: String): JComponent {
+            return MessageBubble(BubbleType.THINKING, message)
         }
     }
 }
