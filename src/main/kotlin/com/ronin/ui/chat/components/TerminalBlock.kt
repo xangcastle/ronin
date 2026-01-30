@@ -12,7 +12,7 @@ import javax.swing.JTextArea
 /**
  * Terminal block component for displaying command output
  */
-class TerminalBlock(private val command: String) : JPanel(FlowLayout(FlowLayout.LEFT)) {
+class TerminalBlock(private val command: String) : JPanel(BorderLayout()) {
     
     private val termPanel = JPanel(BorderLayout())
     private val outputArea = JTextArea()
@@ -38,11 +38,12 @@ class TerminalBlock(private val command: String) : JPanel(FlowLayout(FlowLayout.
         outputArea.foreground = Color.LIGHT_GRAY
         outputArea.font = Font("JetBrains Mono", Font.PLAIN, 12)
         outputArea.isEditable = false
-        outputArea.columns = 50
+        outputArea.lineWrap = true
+        outputArea.wrapStyleWord = true
         outputArea.rows = 5
         termPanel.add(outputArea, BorderLayout.CENTER)
         
-        add(termPanel)
+        add(termPanel, BorderLayout.CENTER)
     }
     
     /**
@@ -64,4 +65,8 @@ class TerminalBlock(private val command: String) : JPanel(FlowLayout(FlowLayout.
      * Gets the current output text
      */
     fun getOutput(): String = outputArea.text
+    
+    override fun getMaximumSize(): java.awt.Dimension {
+        return java.awt.Dimension(Int.MAX_VALUE, super.getPreferredSize().height)
+    }
 }
