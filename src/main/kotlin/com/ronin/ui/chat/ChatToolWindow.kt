@@ -15,6 +15,7 @@ import com.ronin.ui.chat.components.ControlBar
 import com.ronin.ui.chat.components.MessageBubble
 import com.ronin.ui.chat.components.TerminalBlock
 import java.awt.BorderLayout
+import java.util.concurrent.Future
 import javax.swing.*
 
 /**
@@ -37,6 +38,7 @@ class ChatToolWindow(private val project: Project) {
     private val messageHistory = mutableListOf<Map<String, String>>()
     private var isGenerating = false
     private var lastTerminalBlock: TerminalBlock? = null
+    private var currentCommandFuture: Future<*>? = null
     
     companion object {
         private const val KEY = "RoninChatToolWindow"
@@ -202,7 +204,7 @@ class ChatToolWindow(private val project: Project) {
             scrollToBottom()
         }
         
-        ApplicationManager.getApplication().executeOnPooledThread {
+        currentCommandFuture = ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 val terminalService = project.service<TerminalService>()
                 val outputBuffer = StringBuilder()
@@ -232,6 +234,9 @@ class ChatToolWindow(private val project: Project) {
                 }
                 
                 SwingUtilities.invokeLater {
+                    // If generation was cancelled, don't proceed with follow-up
+                    if (!isGenerating) return@invokeLater
+
                     val remaining: String
                     synchronized(lock) { remaining = outputBuffer.toString() }
                     if (remaining.isNotEmpty()) {
@@ -246,8 +251,10 @@ class ChatToolWindow(private val project: Project) {
                 }
             } catch (e: Exception) {
                 SwingUtilities.invokeLater {
-                    addSystemMessage("❌ Command failed: ${e.message}")
-                    setGenerating(false)
+                    if (isGenerating) {
+                        addSystemMessage("❌ Command failed: ${e.message}")
+                        setGenerating(false)
+                    }
                 }
             }
         }
@@ -258,10 +265,25 @@ class ChatToolWindow(private val project: Project) {
      */
     private fun handleActionButtonClick() {
         if (isGenerating) {
+            var cancelled = false
+            
+            // Cancel API task
             if (api.cancelCurrentTask()) {
-                addSystemMessage("🛑 Request cancelled by user.")
-                setGenerating(false)
+                cancelled = true
             }
+            
+            // Cancel running command
+            if (currentCommandFuture != null && !currentCommandFuture!!.isDone) {
+                currentCommandFuture?.cancel(true)
+                currentCommandFuture = null
+                cancelled = true
+            }
+            
+            if (cancelled) {
+                addSystemMessage("🛑 Request cancelled by user.")
+            }
+            
+            setGenerating(false)
         } else {
             clearChat()
         }
